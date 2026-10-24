@@ -9,3 +9,5 @@ logs/
 .env.*
 test/
 
+# Local planning documents must not be published.
+[Pp][Ll][Aa][Nn].[Mm][Dd]
