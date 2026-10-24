@@ -3,5 +3,9 @@
 outputs/
 __pycache__/
 *.pyc
+logs/
+.cache-deploy.lock
+.env
+.env.*
 test/
 

@@ -1,8 +1,14 @@
-accelerate>=1.0
-transformers>=5.0
-huggingface_hub>=0.30
-safetensors>=0.4.3
-imageio>=2.34
-imageio-ffmpeg>=0.5
-av>=11
-Pillow>=10
+# Python 3.11–3.13. Install requirements-torch.txt first.
+# Direct versions are pinned; logs/*-packages.txt records resolved transitive versions.
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+diffusers @ https://codeload.github.com/huggingface/diffusers/zip/aaf57d03a3edfbd9de457d2872417a92f149a91d
+accelerate==1.15.0
+transformers==5.20.2
+huggingface_hub==1.32.0
+safetensors==0.8.0
+numpy==2.3.5
+imageio==2.38.1
+imageio-ffmpeg==0.6.0
+av==16.1.0
+Pillow==12.1.0

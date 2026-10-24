@@ -1,0 +1,28 @@
+name: Deployment checks (no model weights)
+on: [push, pull_request]
+jobs:
+  static-and-regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bash -n deploy.sh
+      - run: shellcheck deploy.sh
+      - run: python -m unittest discover -s tests -v
+  cpu-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install torch==2.11.0+cpu torchvision==0.26.0+cpu --index-url https://download.pytorch.org/whl/cpu
+      - name: Install the audited stack with CPU-only torch for this check
+        run: |
+          sed '/^torch/d' requirements.txt > /tmp/h3-cpu-requirements.txt
+          pip install -r /tmp/h3-cpu-requirements.txt
+          pip check
+      - run: python verify_runtime.py --cpu
