@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -65,7 +66,11 @@ if [[ "$1" == -m && "$2" == venv ]]; then
   cp "$0" "$3/bin/python"
 fi
 if [[ "$1" == acceptance.py ]]; then
-  if [[ "${SLOW_GENERATE:-0}" == 1 ]]; then sleep 10; fi
+  if [[ "${SLOW_GENERATE:-0}" == 1 ]]; then
+    trap 'exit 143' TERM
+    echo $$ > "$TRACE.child"
+    while true; do sleep 0.1; done
+  fi
   exit "${FAIL_GENERATE:-0}"
 fi
 exit 0
@@ -150,6 +155,34 @@ exit 0
         self.assertEqual(result.returncode, 7)
         self.assertIn("last_stage=generation", self.report())
         self.assertNotIn("validated_output=", self.report())
+
+    def test_shell_sigterm_forwards_to_acceptance_and_waits(self):
+        process = subprocess.Popen(["bash", "deploy.sh", "--test"], cwd=self.root,
+                                   env={**self.env, "SLOW_GENERATE": "1"},
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        pid_file = Path(str(self.trace) + ".child")
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(pid_file.exists(), "Acceptance did not start")
+            pid = int(pid_file.read_text())
+            process.terminate()
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 143, stdout + stderr)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+            self.assertIn("exit_code=143", self.report())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
+            if pid_file.exists():
+                try:
+                    import signal
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_generation_deadline_is_forwarded_per_workflow(self):
         result = self.run_mode("--test", H3_TEST_TIMEOUT="600")

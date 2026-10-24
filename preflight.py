@@ -11,6 +11,21 @@ import subprocess
 from h3_config import GIB
 
 
+def validate_output(output: Path, prompt: str | None = None) -> Path:
+    """Reject cheap input/path errors before environment installation or model download."""
+    if prompt is not None and not prompt.strip():
+        raise ValueError("Prompt must not be empty or whitespace")
+    output = output.expanduser().resolve()
+    if output.suffix.lower() != ".mp4":
+        raise ValueError("Output must have an .mp4 extension")
+    if output.exists() and not output.is_file():
+        raise ValueError(f"Output is not a file: {output}")
+    parent = existing_parent(output.parent)
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise ValueError(f"Output directory is not writable: {parent}")
+    return output
+
+
 def existing_parent(path: Path) -> Path:
     path = path.expanduser().resolve()
     while not path.exists():
@@ -79,10 +94,12 @@ def main() -> None:
     mode.add_argument("--storage-only", action="store_true", help="Prepare files without requiring GPU or inference RAM")
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--prompt", help="Validate the generation prompt before expensive work")
     parser.add_argument("--environment", type=Path, required=True)
     parser.add_argument("--pip-cache", type=Path, required=True)
     parser.add_argument("--install", action="store_true", help="Reserve additional space for Python/CUDA installation")
     args = parser.parse_args()
+    args.output = validate_output(args.output, args.prompt)
     if not args.storage_only:
         result = subprocess.run(
             ["nvidia-smi", "-i", args.gpu, "--query-gpu=memory.total,memory.free,driver_version",

@@ -115,9 +115,16 @@ class AcceptanceTests(unittest.TestCase):
         self.fixtures = {name: self.root / name for name in ("first", "last", "video", "audio")}
 
     def run_suite(self, full=True, side_effect=None, media_error=None):
+        responses = iter(side_effect) if isinstance(side_effect, list) else None
+        def fake_generation(command, **kwargs):
+            if isinstance(side_effect, BaseException):
+                raise side_effect
+            result = next(responses) if responses is not None else subprocess.CompletedProcess(command, 0)
+            if result.returncode == 0:
+                Path(command[command.index("--output") + 1]).write_bytes(b"new test output")
+            return result
         with patch.object(acceptance, "create_fixtures", return_value=self.fixtures), \
-             patch.object(acceptance.subprocess, "run", side_effect=side_effect,
-                          return_value=subprocess.CompletedProcess([], 0)) as runner, \
+             patch.object(acceptance, "run_generation", side_effect=fake_generation) as runner, \
              patch.object(acceptance, "verify_media", side_effect=media_error), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             code = acceptance.run_acceptance(full=full, output=self.root / "smoke.mp4",
@@ -166,10 +173,10 @@ class AcceptanceTests(unittest.TestCase):
         self.assertNotIn("validated_output", report["workflows"]["t2va"])
 
     def test_real_subprocess_deadline_is_enforced(self):
-        real_run = subprocess.run
+        real_run = acceptance.run_generation
         def slow_child(command, **kwargs):
             return real_run([sys.executable, "-c", "import time; time.sleep(10)"], **kwargs)
-        with patch.object(acceptance.subprocess, "run", side_effect=slow_child), \
+        with patch.object(acceptance, "run_generation", side_effect=slow_child), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             code = acceptance.run_acceptance(full=False, output=self.root / "out.mp4",
                                             report_path=self.report_path, prompt="ball", timeout=0.1)

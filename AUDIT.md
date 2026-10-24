@@ -1,5 +1,7 @@
 # MiniMax-H3 部署审查与修正记录
 
+按通用规范进行的后续审查、旧产物误判/取消回收/提前校验/损坏清单修复见 [docs/project_review.md](docs/project_review.md)。当前代码结构和流程图分别见 [code_structure.md](docs/code_structure.md)、[code_flow.md](docs/code_flow.md)。
+
 ## 2026-10-25：修正完整公开模型范围
 
 之前实现把 t2va 冒烟测试范围当成了部署范围，遗漏了 `transformer_ref` 和两个工作流入口。本次按 既定步骤 先制定计划，再修改代码和测试。

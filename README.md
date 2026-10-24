@@ -1,5 +1,7 @@
 # MiniMax-H3 单卡部署与验收
 
+通用开发规范见 [all_project_readme.md](all_project_readme.md)。本项目的 [代码结构](docs/code_structure.md)、[代码流程图](docs/code_flow.md) 和 [当前审查结果](docs/project_review.md) 位于 `docs/`。
+
 **首要要求：部署的模型是 MiniMax-H3，模型仓库固定为 `MiniMaxAI/MiniMax-H3`。** 脚本必须从该仓库下载权重、在目标机器本地加载并测试；环境不满足时明确报错，不自动替换模型。
 
 当前部署覆盖 MiniMax-H3 公开本地模型的三个工作流：**文生音视频 `t2va`、首帧/尾帧/首尾帧 `fl2va`、图像/视频/音频参考 `ref2va`**。下载两套生成权重和全部共享组件，使用 Diffusers 加载器，面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。
@@ -129,6 +131,10 @@ export CUDA_VISIBLE_DEVICES=0
 成功要求：进程退出码 0；MP4 完整可解码；H.264 视频尺寸、24fps、帧数符合请求；AAC 音频为 32kHz 双声道，时长与视频相差不超过 0.15 秒。生成先写临时文件，验证通过才替换目标文件；失败时保留之前的成功产物。结构验证不判断内容质量、对白准确性或主观音画同步。
 
 完整验收还要求 `*-acceptance.json` 中三个工作流均为 `passed`，且 `all_workflows_passed=true`。快速测试的 `scope=quick-t2va-only`、其余流程为 `not_run`。任何失败/超时会停止后续执行并保留逐流程状态；不能用上一次的样片作为这次成功证据。自动生成的简单测试素材只用于验证接口和流程，不代表生产画质测试。
+
+快速测试在新的 `.h3-quick-*` 临时目录中生成，父进程确认本次新文件完整有效后才替换 `H3_OUTPUT`。空提示词、输出扩展名和输出路径冲突在昂贵步骤前检查。损坏的本地 manifest 会提示重跑 `--download`，可复用已有模型文件。
+
+生成验收阶段收到 SIGINT/SIGTERM 时，shell 转发给验收父进程并等待；Linux 生成进程组及同组辅助进程会被回收。当前任务记录为 `cancelled`，后续为 `not_run`，退出码为 130/143。超时返回 124。SIGKILL、断电以及安装/下载工具的所有子任务不在此取消保证内。
 
 | 现象 | 排查方法 |
 | --- | --- |

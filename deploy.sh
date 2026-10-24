@@ -29,6 +29,17 @@ STAGE=platform
 SECONDS=0
 STEP_STARTED=0
 REPORT_FILE=''
+ACCEPTANCE_PID=''
+cancel_run() {
+  local signum="$1" code="$2"
+  trap '' INT TERM
+  if [[ -n "${ACCEPTANCE_PID}" ]]; then
+    kill -s "${signum}" "${ACCEPTANCE_PID}" 2>/dev/null || true
+    wait "${ACCEPTANCE_PID}" || true
+    ACCEPTANCE_PID=''
+  fi
+  exit "${code}"
+}
 finish() {
   local code=$? result=FAIL
   trap - EXIT
@@ -54,8 +65,8 @@ finish() {
 }
 trap finish EXIT
 trap 'echo "ERROR: stage=${STAGE}, line=${LINENO}. See README.md." >&2' ERR
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'cancel_run INT 130' INT
+trap 'cancel_run TERM 143' TERM
 run_stage() {
   STAGE="$1"
   shift
@@ -124,7 +135,7 @@ if ((NEED_GPU)); then
 else
   PREFLIGHT_FLAGS+=(--storage-only)
 fi
-run_stage preflight "${H3_PYTHON}" preflight.py --cache "${HF_HUB_CACHE}" --output "${H3_OUTPUT}" --environment "${PROJECT_DIR}" --pip-cache "${PIP_CACHE_DIR}" "${PREFLIGHT_FLAGS[@]}"
+run_stage preflight "${H3_PYTHON}" preflight.py --cache "${HF_HUB_CACHE}" --output "${H3_OUTPUT}" --prompt "${H3_PROMPT}" --environment "${PROJECT_DIR}" --pip-cache "${PIP_CACHE_DIR}" "${PREFLIGHT_FLAGS[@]}"
 if [[ "${MODE}" == --preflight ]]; then
   echo "Hardware preflight passed; dependencies, model access and CUDA kernels are not tested."
   exit 0
@@ -165,11 +176,15 @@ check_cache() {
   "${PYTHON}" verify_model.py
 }
 test_generation() {
-  local scope=all
+  local scope=all status=0
   if [[ "${MODE}" == --test ]]; then scope=quick; fi
   ACCEPTANCE_REPORT="${LOG_FILE%.log}-acceptance.json"
   "${PYTHON}" acceptance.py --scope "${scope}" --output "${H3_OUTPUT}" \
-    --report "${ACCEPTANCE_REPORT}" --prompt "${H3_PROMPT}" --timeout "${H3_TEST_TIMEOUT}"
+    --report "${ACCEPTANCE_REPORT}" --prompt "${H3_PROMPT}" --timeout "${H3_TEST_TIMEOUT}" &
+  ACCEPTANCE_PID=$!
+  wait "${ACCEPTANCE_PID}" || status=$?
+  ACCEPTANCE_PID=''
+  return "${status}"
 }
 
 if ((ALLOW_INSTALL)); then

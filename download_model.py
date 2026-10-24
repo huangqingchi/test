@@ -20,7 +20,8 @@ def selected_file(name: str) -> bool:
 
 
 def validate_manifest(files: dict[str, int]) -> None:
-    if not files or any(not selected_file(name) or not isinstance(size, int) or size <= 0
+    if not isinstance(files, dict) or not files or any(not isinstance(name, str) or
+                        not selected_file(name) or type(size) is not int or size <= 0
                         for name, size in files.items()):
         raise RuntimeError("Invalid model file manifest")
     if not all(name in files for name in ROOT_CONFIGS):
@@ -51,13 +52,21 @@ def local_snapshot() -> Path:
     snapshot, manifest = cache_paths()
     if not manifest.is_file():
         raise RuntimeError("Verified model manifest missing; run bash deploy.sh --download")
-    data = json.loads(manifest.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Cannot read model manifest; rerun bash deploy.sh --download to rebuild it") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("Invalid model manifest object; rerun bash deploy.sh --download")
     if data.get("repo_id") != MODEL_ID or data.get("revision") != MODEL_REVISION:
         raise RuntimeError("Cached manifest belongs to another model revision")
     if data.get("schema") != MANIFEST_SCHEMA or data.get("profile") != MODEL_PROFILE:
         raise RuntimeError("Full H3 manifest required; rerun --download to upgrade the partial cache")
-    files = data["files"]
-    validate_manifest(files)
+    files = data.get("files")
+    try:
+        validate_manifest(files)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc}; rerun bash deploy.sh --download to rebuild the manifest") from exc
     missing = missing_files(snapshot, files)
     if missing:
         raise RuntimeError(f"Model cache is incomplete ({len(missing)} files); rerun bash deploy.sh --download")
