@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MiniMax-H3 项目流程图</title>
+<style>
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f6fb;color:#172b4d;font:16px/1.6 "Microsoft YaHei",sans-serif}
+header,main{max-width:1440px;margin:auto;padding:28px}h1{font-size:30px;margin:0 0 6px}header p{margin:0 0 18px;color:#53657d}
+a{color:#2159a5;text-decoration:none}a:hover{text-decoration:underline}nav{display:flex;gap:18px;flex-wrap:wrap}
+.card{background:white;border:1px solid #d9e3f0;border-radius:12px;margin-bottom:28px;overflow:hidden;scroll-margin-top:16px}
+.card-head{padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #e4ebf4;flex-wrap:wrap}
+h2{font-size:20px;margin:0}.controls{padding:12px 22px;display:flex;gap:10px;align-items:center;background:#fbfcfe}
+button{font:inherit;border:1px solid #c6d3e4;border-radius:6px;background:white;padding:4px 14px;cursor:pointer}button:hover{background:#eaf2ff}
+output{font-size:14px;color:#53657d}.viewport{overflow:auto;max-height:82vh;padding:24px;text-align:center}.viewport img{display:block;margin:auto;width:auto;max-width:100%;height:auto}
+footer{padding:0 28px 30px;max-width:1440px;margin:auto;color:#53657d}@media(max-width:700px){header,main{padding:14px}.viewport{padding:10px}.card-head{padding:14px}}
+</style></head><body>
+<header><h1>MiniMax-H3 项目流程图</h1><p>直接查看图形、箭头和分支。可离线打开，不依赖 Markdown 插件或在线服务。超出屏幕时可滚动或缩放。</p><nav><a href="#deployment">一键配置与完整部署</a><a href="#cache">模型下载与缓存恢复</a><a href="#generation">生成与产物验收</a><a href="#cancellation">失败、超时与取消</a><a href="#modules">模块调用关系</a></nav></header>
+<main><section id="deployment" class="card">
+<div class="card-head"><h2>一键配置与完整部署</h2><nav><a href="deployment.svg" target="_blank">打开 SVG</a>
+<a href="deployment.png" target="_blank">打开 PNG</a><a href="deployment.png" download>下载图片</a></nav></div>
+<div class="controls"><button type="button" data-step="-0.25">缩小</button><button type="button" data-fit>适应宽度</button><button type="button" data-step="0.25">放大</button><output>100%</output></div>
+<div class="viewport"><img src="deployment.svg" alt="一键配置与完整部署" loading="lazy"></div></section>
+<section id="cache" class="card">
+<div class="card-head"><h2>模型下载与缓存恢复</h2><nav><a href="cache.svg" target="_blank">打开 SVG</a>
+<a href="cache.png" target="_blank">打开 PNG</a><a href="cache.png" download>下载图片</a></nav></div>
+<div class="controls"><button type="button" data-step="-0.25">缩小</button><button type="button" data-fit>适应宽度</button><button type="button" data-step="0.25">放大</button><output>100%</output></div>
+<div class="viewport"><img src="cache.svg" alt="模型下载与缓存恢复" loading="lazy"></div></section>
+<section id="generation" class="card">
+<div class="card-head"><h2>生成与产物验收</h2><nav><a href="generation.svg" target="_blank">打开 SVG</a>
+<a href="generation.png" target="_blank">打开 PNG</a><a href="generation.png" download>下载图片</a></nav></div>
+<div class="controls"><button type="button" data-step="-0.25">缩小</button><button type="button" data-fit>适应宽度</button><button type="button" data-step="0.25">放大</button><output>100%</output></div>
+<div class="viewport"><img src="generation.svg" alt="生成与产物验收" loading="lazy"></div></section>
+<section id="cancellation" class="card">
+<div class="card-head"><h2>失败、超时与取消</h2><nav><a href="cancellation.svg" target="_blank">打开 SVG</a>
+<a href="cancellation.png" target="_blank">打开 PNG</a><a href="cancellation.png" download>下载图片</a></nav></div>
+<div class="controls"><button type="button" data-step="-0.25">缩小</button><button type="button" data-fit>适应宽度</button><button type="button" data-step="0.25">放大</button><output>100%</output></div>
+<div class="viewport"><img src="cancellation.svg" alt="失败、超时与取消" loading="lazy"></div></section>
+<section id="modules" class="card">
+<div class="card-head"><h2>模块调用关系</h2><nav><a href="modules.svg" target="_blank">打开 SVG</a>
+<a href="modules.png" target="_blank">打开 PNG</a><a href="modules.png" download>下载图片</a></nav></div>
+<div class="controls"><button type="button" data-step="-0.25">缩小</button><button type="button" data-fit>适应宽度</button><button type="button" data-step="0.25">放大</button><output>100%</output></div>
+<div class="viewport"><img src="modules.svg" alt="模块调用关系" loading="lazy"></div></section></main>
+<footer>运行入口：bash setup.sh（仅环境） / bash deploy.sh（完整部署）。本页展示实现流程，不表示目标 GPU 实测已通过。</footer>
+<script>
+document.querySelectorAll('.card').forEach(card=>{
+ const img=card.querySelector('img'),view=card.querySelector('.viewport'),out=card.querySelector('output');let zoom=1;
+ function apply(){img.style.maxWidth='none';img.style.width=Math.max(100,(view.clientWidth-48)*zoom)+'px';out.textContent=Math.round(zoom*100)+'%'}
+ card.querySelectorAll('[data-step]').forEach(button=>button.onclick=()=>{zoom=Math.max(.25,Math.min(4,zoom+Number(button.dataset.step)));apply()});
+ card.querySelector('[data-fit]').onclick=()=>{zoom=1;apply()};
+});
+</script></body></html>

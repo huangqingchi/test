@@ -1,0 +1,21 @@
+flowchart TD
+    Accept[acceptance.py] --> Scope{测试范围}
+    Scope -->|完整| Fixture[创建独立运行目录和三种输入素材]
+    Fixture --> Queue[依次 t2va fl2va ref2va]
+    Scope -->|快速| Temp[创建新的临时运行目录]
+    Temp --> Quick[只选 t2va]
+    Queue --> Spawn[独立进程组启动 generate.py]
+    Quick --> Spawn
+    Spawn --> Inputs[校验缓存 输入参数和媒体]
+    Inputs --> Load[加载当前工作流权重并 CPU 卸载]
+    Load --> Generate[模型生成音视频]
+    Generate --> ChildVerify[子进程编码并完整验证]
+    ChildVerify --> ParentVerify[父进程要求新文件存在并再次解码]
+    ParentVerify --> Mode{快速还是完整}
+    Mode -->|快速| Publish[原子替换快速测试目标]
+    Mode -->|完整| Keep[保留本次独立目录的样片]
+    Publish --> Done[记录工作流 passed]
+    Keep --> Done
+    Done --> More{还有工作流}
+    More -->|是| Spawn
+    More -->|否| Final[按实际范围写最终报告]

@@ -1,0 +1,18 @@
+flowchart LR
+    Setup[setup.sh] --> Shell[deploy.sh]
+    Shell[deploy.sh] --> Env[scripts/environment.sh]
+    Shell --> Pre[preflight.py]
+    Shell --> Runtime[verify_runtime.py]
+    Shell --> Download[download_model.py]
+    Shell --> Index[verify_model.py]
+    Shell --> Accept[acceptance.py]
+    Accept --> Fixtures[smoke_fixtures.py]
+    Accept --> Runner[process_runner.py]
+    Runner --> Gen[generate.py 子进程]
+    Gen --> Inputs[workflow_inputs.py]
+    Gen --> Download
+    Gen --> Media[verify_media.py]
+    Accept --> Media
+    Download --> Config[h3_config.py]
+    Index --> Config
+    Gen --> Config

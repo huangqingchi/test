@@ -1,0 +1,25 @@
+flowchart TD
+    Start([开始：选择一键入口]) --> Entry{执行哪个脚本？}
+    Entry -->|仅配置环境| Setup["bash setup.sh<br/>转交 deploy.sh --setup"]
+    Entry -->|完整部署| Deploy["bash deploy.sh"]
+    Setup --> Prep["检查 Ubuntu / Python / 路径 / 磁盘<br/>完整部署还检查 GPU 与可用内存"]
+    Deploy --> Prep
+    Prep --> Valid{前置检查通过？}
+    Valid -->|否| Fail["退出并报告原因<br/>已创建日志时记录失败阶段"]
+    Valid -->|是| Install["补齐系统包 → 创建或复用 .venv<br/>安装固定版本的项目依赖"]
+    Install --> Runtime["依赖冲突、导入与音视频编解码检查<br/>完整部署还测试 CUDA 内核"]
+    Runtime --> EnvOK{环境检查通过？}
+    EnvOK -->|否| Fail
+    EnvOK -->|是| Scope{是否仅配置环境？}
+    Scope -->|是| Ready([环境就绪：结束，不下载模型])
+    Scope -->|否| Download["下载完整 MiniMax-H3<br/>两套生成权重 + 全部共享组件"]
+    Download --> Cache{完整清单及三个本地索引通过？}
+    Cache -->|否| Fail
+    Cache -->|是| Run["依次启动独立生成进程<br/>t2va → fl2va → ref2va"]
+    Run --> Passed{三个流程均生成并验证通过？}
+    Passed -->|否| Fail
+    Passed -->|是| Success([完整验收通过：保存三份样片与报告])
+    classDef failure fill:#fff0ee,stroke:#c85142,color:#84271c
+    classDef success fill:#e9f7ef,stroke:#3a8c60,color:#185b34
+    class Fail failure
+    class Ready,Success success

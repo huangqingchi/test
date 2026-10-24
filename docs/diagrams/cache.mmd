@@ -1,0 +1,12 @@
+flowchart TD
+    Hub[查询固定 revision 文件元数据] --> Select[选择完整 Diffusers 组件]
+    Select --> Check[检查组件和权重清单]
+    Check --> Missing[比较本地文件存在性和大小]
+    Missing --> Space[缺失字节加工作余量 检查磁盘]
+    Space --> Fetch[逐文件下载或续传]
+    Fetch --> Verify[再次核对全部文件大小]
+    Verify --> Save[原子写入完整 manifest]
+    Save --> Local[推理前读取本地 manifest]
+    Local --> Valid{格式 schema profile 文件均有效}
+    Valid -->|是| Ready[返回固定本地 snapshot]
+    Valid -->|否| Stop[停止并提示重新执行 download]

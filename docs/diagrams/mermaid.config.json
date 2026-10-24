@@ -1,0 +1,25 @@
+{
+  "theme": "base",
+  "fontFamily": "Microsoft YaHei, Noto Sans CJK SC, sans-serif",
+  "themeVariables": {
+    "primaryColor": "#eaf2ff",
+    "primaryTextColor": "#172b4d",
+    "primaryBorderColor": "#5279ba",
+    "lineColor": "#526581",
+    "secondaryColor": "#f1f5f9",
+    "tertiaryColor": "#ffffff",
+    "fontSize": "16px"
+  },
+  "flowchart": {
+    "htmlLabels": false,
+    "curve": "basis",
+    "nodeSpacing": 35,
+    "rankSpacing": 35,
+    "wrappingWidth": 340
+  },
+  "sequence": {
+    "useMaxWidth": false,
+    "actorFontFamily": "Microsoft YaHei, Noto Sans CJK SC, sans-serif",
+    "noteFontFamily": "Microsoft YaHei, Noto Sans CJK SC, sans-serif"
+  }
+}

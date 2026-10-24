@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant Shell as deploy.sh
+    participant Parent as acceptance.py
+    participant Runner as process_runner.py
+    participant Child as 生成进程组
+    Shell->>Parent: 启动并保存验收进程 PID
+    Parent->>Runner: 执行一个工作流并设置时限
+    Runner->>Child: 新会话启动生成
+    alt 正常完成
+        Child-->>Runner: 返回退出码
+        Runner->>Child: 回收同组遗留辅助进程
+        Runner-->>Parent: 退出码
+        Parent->>Parent: 验证新产物 更新报告
+    else 超时
+        Runner->>Child: 终止进程组并等待回收
+        Runner-->>Parent: TimeoutExpired
+        Parent->>Parent: 当前 timeout 后续 not_run
+        Parent-->>Shell: 124
+    else 操作者向 shell 发送 INT 或 TERM
+        Shell->>Parent: 转发取消信号并等待
+        Parent->>Runner: 抛出可处理的取消异常
+        Runner->>Child: 终止进程组并等待回收
+        Parent->>Parent: 当前 cancelled 后续 not_run
+        Parent-->>Shell: 130 或 143
+    end
+    Shell->>Shell: 保存最终 result 和阶段结果

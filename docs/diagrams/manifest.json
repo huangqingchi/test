@@ -1,0 +1,22 @@
+[
+  {
+    "id": "deployment",
+    "title": "一键配置与完整部署"
+  },
+  {
+    "id": "cache",
+    "title": "模型下载与缓存恢复"
+  },
+  {
+    "id": "generation",
+    "title": "生成与产物验收"
+  },
+  {
+    "id": "cancellation",
+    "title": "失败、超时与取消"
+  },
+  {
+    "id": "modules",
+    "title": "模块调用关系"
+  }
+]

@@ -10,8 +10,10 @@
 ├── README.md                     # 本项目环境、参数、运行说明
 ├── HANDOFF.md                    # 目标机器交付步骤
 ├── AUDIT.md                      # 历史审查记录
+├── setup.sh                      # 独立的一键环境配置入口
 ├── deploy.sh                     # 一键部署、阶段、锁、日志与退出处理
 ├── scripts/environment.sh        # Python 发现和 apt 系统包安装
+├── scripts/render_diagrams.py    # 从 .mmd 再生成 SVG/PNG 和离线查看页
 ├── requirements-torch.txt        # 固定 CUDA torch/torchvision 配对
 ├── requirements.txt              # 固定直接运行依赖和 Diffusers 提交
 ├── h3_config.py                  # 模型、revision、组件、工作流、清单版本
@@ -31,10 +33,12 @@
 │   ├── test_workflows.py         # 工作流、完整缓存、验收报告和失败传播
 │   ├── test_review_regressions.py # 本轮清单/旧产物/参数/进程回收回归
 │   ├── test_cpu_integration.py   # 真实 CPU 库、索引与媒体接口
+│   ├── test_setup_entry.py       # 独立环境入口、参数和退出码
 │   └── fixtures/                # 固定官方索引，测试时不加载权重
 ├── docs/
 │   ├── code_structure.md         # 本文
 │   ├── code_flow.md              # 实际代码流程图
+│   ├── diagrams/                 # 可直接查看的 SVG/PNG、HTML 与图形源文件
 │   └── project_review.md         # 本轮问题、证据、修复与验证边界
 └── .github/workflows/checks.yml  # Ubuntu 非模型回归与 CPU 集成 CI
 ```
@@ -45,6 +49,7 @@
 
 | 模块 | 输入/输出 | 不承担的工作 |
 | --- | --- | --- |
+| `setup.sh` | 无参数 → 转交 deploy.sh --setup | 不下载模型，不启动 GPU 推理 |
 | `deploy.sh` | 环境变量与模式 → 分阶段调用、result/stages/log | 不实现模型推理或业务并行池 |
 | `environment.sh` | 已有解释器/apt 候选 → 兼容 Python/系统包 | 不改系统 Python 链接，不安装驱动 |
 | `preflight.py` | 提示词、输出路径、GPU、缓存盘 → 通过/明确异常 | 不下载或加载模型 |
@@ -59,25 +64,9 @@
 
 ## 调用关系
 
-```mermaid
-flowchart LR
-    Shell[deploy.sh] --> Env[scripts/environment.sh]
-    Shell --> Pre[preflight.py]
-    Shell --> Runtime[verify_runtime.py]
-    Shell --> Download[download_model.py]
-    Shell --> Index[verify_model.py]
-    Shell --> Accept[acceptance.py]
-    Accept --> Fixtures[smoke_fixtures.py]
-    Accept --> Runner[process_runner.py]
-    Runner --> Gen[generate.py 子进程]
-    Gen --> Inputs[workflow_inputs.py]
-    Gen --> Download
-    Gen --> Media[verify_media.py]
-    Accept --> Media
-    Download --> Config[h3_config.py]
-    Index --> Config
-    Gen --> Config
-```
+![模块调用关系](diagrams/modules.png)
+
+[查看可缩放 SVG](diagrams/modules.svg) · [查看全部图形](diagrams/index.html)
 
 图中的 `generate.py → download_model.py` 是调用 `local_snapshot()` 验证缓存，不是推理时调用下载函数。
 
@@ -109,6 +98,6 @@ flowchart LR
 
 ## 测试覆盖
 
-项目共 60 项可发现测试：其中 6 项依赖真实 CPU 库；16 项要求 Linux（14 项 Bash 编排与 2 项 POSIX 进程回收）；其余 38 项可在标准 Windows Python 环境运行。具体通过/跳过情况见 [审查报告](project_review.md)。
+项目共 63 项可发现测试：其中 6 项依赖真实 CPU 库；16 项要求 Linux（14 项 Bash 编排与 2 项 POSIX 进程回收）；其余 41 项可在具备 Git Bash 的 Windows Python 环境运行，其中新增 3 项检查 setup.sh 独立入口。具体通过/跳过情况见 [审查报告](project_review.md)。
 
 CI 的静态 job 执行非模型回归，CPU job 验证固定依赖、真实音视频编解码和首尾帧/混合参考接口。真实模型 GPU 生成仍须目标服务器执行 `--test-all`。

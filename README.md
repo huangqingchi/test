@@ -2,6 +2,16 @@
 
 通用开发规范见 [all_project_readme.md](all_project_readme.md)。本项目的 [代码结构](docs/code_structure.md)、[代码流程图](docs/code_flow.md) 和 [当前审查结果](docs/project_review.md) 位于 `docs/`。
 
+**[直接查看流程图](docs/diagrams/index.html)** · [打开部署流程 PNG 图片](docs/diagrams/deployment.png)。图片无需 Markdown 插件；HTML 在本地浏览器打开可缩放。
+
+只配置项目环境，直接运行根目录脚本：
+
+```bash
+bash setup.sh
+```
+
+`setup.sh` 是 `deploy.sh --setup` 的独立入口：在受支持的 Ubuntu x86_64 上自动选择/安装 Python、创建 `.venv`、安装固定依赖并验证导入和编解码；不要求 GPU，不下载模型。它继承相同的权限、软件源、磁盘和网络前提。完整下载、部署及三个工作流验收仍运行 `bash deploy.sh`。
+
 **首要要求：部署的模型是 MiniMax-H3，模型仓库固定为 `MiniMaxAI/MiniMax-H3`。** 脚本必须从该仓库下载权重、在目标机器本地加载并测试；环境不满足时明确报错，不自动替换模型。
 
 当前部署覆盖 MiniMax-H3 公开本地模型的三个工作流：**文生音视频 `t2va`、首帧/尾帧/首尾帧 `fl2va`、图像/视频/音频参考 `ref2va`**。下载两套生成权重和全部共享组件，使用 Diffusers 加载器，面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。

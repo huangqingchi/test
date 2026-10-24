@@ -8,6 +8,8 @@
 bash deploy.sh
 ```
 
+如仅需一键配置解释器、虚拟环境和依赖，运行 `bash setup.sh`。完整部署会包含同一套配置步骤，不必先手工执行一遍。[直接打开流程图](docs/diagrams/index.html)
+
 无需预置模型。脚本自动适配 Python/依赖、检查 GPU/资源、下载完整 Diffusers 模型（两套 transformer + 共享组件，约 **195.89GiB**），然后依次运行：
 
 1. `t2va`：文字生成带声音视频。
