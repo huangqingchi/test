@@ -4,12 +4,14 @@
 
 **验证状态：Windows 本地及 Ubuntu 24.04 CI 的依赖安装、CPU 导入/编解码、回归检查已通过；尚未在目标 GPU 服务器完成模型推理验收。** [Ubuntu CI 结果](https://github.com/huangqingchi/test/actions/runs/40109323527)。具体问题与扩展方案见 [AUDIT.md](AUDIT.md)。
 
+**现有目标机器上的交付入口是 `bash deploy.sh`：自动适配环境、下载模型、部署并实际测试。** 不要求事先准备模型或另一台机器。分阶段命令用于失败后的续跑，详见 [交付步骤 HANDOFF.md](HANDOFF.md)。
+
 ## 环境要求
 
 | 项目 | 本项目要求与说明 |
 | --- | --- |
 | 系统 | 推荐 Ubuntu 24.04 x86_64；Windows 仅用于开发检查 |
-| Python | 3.11–3.13；本次本地验证使用 3.12。Ubuntu 22.04 默认的 3.10 不适用，须自行提供受支持解释器 |
+| Python | 稳定版 3.11–3.13；自动复用已有虚拟环境或兼容解释器，缺少时从现有 apt 源选择 Python + venv；源中无稳定版本则明确退出 |
 | GPU | 一张完整的 80GB 级显卡；检查总显存、空闲显存均至少 75,000MiB，并实际测试原生 BF16 与 CUDA attention |
 | 驱动 | 预装宿主机 NVIDIA 驱动；CUDA 12.x 兼容下限 525.60.13，CUDA 12.8 建议 570.26+，新架构还需相应驱动；以实际内核运行为准 |
 | 内存 | **可用**主机/容器内存至少 150GiB；建议配置 192GiB 或更多。不能用 swap 替代；容器限额会参与检查 |
@@ -28,9 +30,9 @@ cd minimax-h3-demo
 bash deploy.sh
 ```
 
-执行顺序：平台与资源检查 → 系统包与虚拟环境 → 固定依赖 → CUDA/编码小测试 → 下载指定模型组件 → 生成 → 完整解码验收。
+执行顺序：平台检查 → 自动选择/安装兼容 Python → 资源检查 → 系统包与虚拟环境 → 固定依赖 → CUDA/编码小测试 → 下载指定模型组件 → 生成 → 完整解码验收。
 
-缺少系统包时脚本使用 `apt-get`，非 root 用户可能需要输入 sudo 密码；脚本不会安装 NVIDIA 驱动或替换系统 Python。默认产物为 `outputs/smoke-test.mp4`，运行日志和完整的已安装依赖清单写入 `logs/`。
+缺少系统包时脚本使用 `apt-get`，非 root 用户需已具备非交互 sudo 权限，或事先在终端执行 `sudo -v`；不具备时脚本立即报错。脚本不会安装 NVIDIA 驱动或替换系统 Python。默认产物为 `outputs/smoke-test.mp4`，运行日志、阶段耗时、结果报告和完整的已安装依赖清单写入 `logs/`。Python 包候选以实际配置的软件源为准；推荐的 [Ubuntu 24.04 提供 Python 3.12 venv 包](https://packages.ubuntu.com/noble/python3.12-venv)。
 
 若项目目录磁盘较小，可使用绝对路径指定缓存：
 
@@ -47,9 +49,11 @@ bash deploy.sh
 
 | 命令 | 行为 |
 | --- | --- |
+| `bash deploy.sh --prepare` | 自动适配环境、检查 CPU 导入/编解码并下载模型；无 GPU/推理 RAM 要求，用于测试前准备 |
 | `bash deploy.sh --preflight` | 只读平台/资源检查，不安装、不下载；无法证明依赖或模型可运行 |
-| `bash deploy.sh --setup` | 安装系统包和依赖，测试 CUDA 内核与小型音视频编解码；不下载模型 |
-| `bash deploy.sh --download` | 使用已有环境，下载并校验固定版本的必要组件；中断后可重跑 |
+| `bash deploy.sh --setup` | 自动选择/安装 Python，安装系统包和依赖，测试 CPU 导入/编解码；不需要 GPU、不下载模型 |
+| `bash deploy.sh --download` | 使用已有环境，下载并校验固定版本组件；无 GPU 要求，中断后可重跑 |
+| `bash deploy.sh --check` | 离线 GPU/资源/依赖/编解码/缓存检查；不加载模型权重，不安装、不下载 |
 | `bash deploy.sh --test` | 使用已有环境和已校验模型，离线生成与验收；不会自动补下载 |
 
 依赖安装失败，修复网络后重跑 `--setup`。模型下载中断，重跑 `--download`；已完成文件按大小检查，缺失/截断文件继续处理。安装阶段需要额外磁盘余量，已有完整环境和模型时使用 `--test`，避免重新走安装检查。
@@ -73,6 +77,7 @@ PyTorch/torchvision 固定为 `2.11.0+cu128` / `0.26.0+cu128`，必须成对安�
 | `H3_PIP_CACHE` | pip 下载缓存；默认项目下 `.cache/pip` |
 | `H3_OUTPUT` | MP4 输出路径，建议绝对路径 |
 | `H3_PROMPT` | 一键测试的文本提示词 |
+| `H3_TEST_TIMEOUT` | 模型加载、生成与输出验证阶段的时限，秒；默认 0 不限时，例如 600。超时算失败，不是成功验收 |
 | `HF_TOKEN` | 模型访问需要认证时设置；不要写入仓库或命令行参数 |
 
 直接调整生成参数，先确保缓存环境变量一致并选择一张 GPU：
@@ -114,7 +119,7 @@ Docker 需要宿主 NVIDIA 驱动和 NVIDIA Container Toolkit，以及足够的�
 ```bash
 python -m unittest discover -s tests -v
 bash -n deploy.sh
-shellcheck deploy.sh
+shellcheck -x deploy.sh scripts/environment.sh
 # 使用已安装运行依赖的环境；不加载模型权重
 python verify_runtime.py --cpu
 ```

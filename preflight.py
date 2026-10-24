@@ -74,37 +74,43 @@ def check_disks(budgets: list[tuple[Path, int]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gpu", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--gpu")
+    mode.add_argument("--storage-only", action="store_true", help="Prepare files without requiring GPU or inference RAM")
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--environment", type=Path, required=True)
     parser.add_argument("--pip-cache", type=Path, required=True)
     parser.add_argument("--install", action="store_true", help="Reserve additional space for Python/CUDA installation")
     args = parser.parse_args()
-    result = subprocess.run(
-        ["nvidia-smi", "-i", args.gpu, "--query-gpu=memory.total,memory.free,driver_version",
-         "--format=csv,noheader,nounits"], check=True, capture_output=True, text=True,
-    )
-    rows = result.stdout.strip().splitlines()
-    if len(rows) != 1:
-        raise RuntimeError("Expected one GPU; select a full GPU UUID")
-    total, free, driver = [x.strip() for x in rows[0].split(",")]
-    if int(total) < 75000 or int(free) < 75000:
-        raise RuntimeError(f"BF16 profile needs 75000 MiB total AND free VRAM; found {total}/{free}. Free other jobs or use a separately configured quantized profile")
-    # 525.60.13 is the CUDA 12.x minor-compatibility floor, not a guarantee for every kernel.
-    if tuple(map(int, driver.split("."))) < (525, 60, 13):
-        raise RuntimeError(f"Driver {driver} is below the CUDA 12.x compatibility floor 525.60.13")
-    if tuple(map(int, driver.split("."))) < (570, 26):
-        print(f"WARNING: driver {driver}; prefer 570.26+ for CUDA 12.8. Runtime kernels will be tested.")
-    memory = available_memory()
-    if memory < 150 * GIB:
-        raise RuntimeError(f"Need 150 GiB available host/container RAM; found {memory/GIB:.1f} GiB (swap is not counted)")
+    if not args.storage_only:
+        result = subprocess.run(
+            ["nvidia-smi", "-i", args.gpu, "--query-gpu=memory.total,memory.free,driver_version",
+             "--format=csv,noheader,nounits"], check=True, capture_output=True, text=True,
+        )
+        rows = result.stdout.strip().splitlines()
+        if len(rows) != 1:
+            raise RuntimeError("Expected one GPU; select a full GPU UUID")
+        total, free, driver = [x.strip() for x in rows[0].split(",")]
+        if int(total) < 75000 or int(free) < 75000:
+            raise RuntimeError(f"BF16 profile needs 75000 MiB total AND free VRAM; found {total}/{free}. Free other jobs or use a separately configured quantized profile")
+        # 525.60.13 is the CUDA 12.x minor-compatibility floor, not a guarantee for every kernel.
+        if tuple(map(int, driver.split("."))) < (525, 60, 13):
+            raise RuntimeError(f"Driver {driver} is below the CUDA 12.x compatibility floor 525.60.13")
+        if tuple(map(int, driver.split("."))) < (570, 26):
+            print(f"WARNING: driver {driver}; prefer 570.26+ for CUDA 12.8. Runtime kernels will be tested.")
+        memory = available_memory()
+        if memory < 150 * GIB:
+            raise RuntimeError(f"Need 150 GiB available host/container RAM; found {memory/GIB:.1f} GiB (swap is not counted)")
     budgets = [(args.cache, 20 * GIB), (args.output.parent, 2 * GIB),
                (args.environment, (20 if args.install else 1) * GIB)]
     if args.install:
         budgets.append((args.pip_cache, 10 * GIB))
     check_disks(budgets)
-    print(f"Hardware OK: {args.gpu}, VRAM {free}/{total} MiB, driver {driver}, available RAM {memory/GIB:.1f} GiB")
+    if args.storage_only:
+        print("Preparation storage OK; GPU and inference RAM were not checked")
+    else:
+        print(f"Hardware OK: {args.gpu}, VRAM {free}/{total} MiB, driver {driver}, available RAM {memory/GIB:.1f} GiB")
     print("Model space is checked separately against missing files at the pinned revision before download.")
 
 

@@ -5,132 +5,187 @@ PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd -- "${PROJECT_DIR}"
 MODE="${1:-all}"
 fail() { echo "ERROR: $*" >&2; exit 1; }
-usage() { echo "Usage: bash deploy.sh [--preflight|--setup|--download|--test|--help]"; }
+usage() {
+  cat <<'HELP'
+Usage: bash deploy.sh [--prepare|--setup|--download|--check|--test|--preflight|--help]
+  (no flag)    Adapt environment, download, then run GPU smoke test.
+  --prepare    Install dependencies + download model ahead of time; no GPU required.
+  --setup      Install dependencies and test imports/codecs; no GPU required.
+  --download   Resume model download using existing environment; no GPU required.
+  --check      Offline GPU/runtime/cache readiness check; no model weights loaded.
+  --test       Offline GPU generation + full MP4 validation; no install/download.
+  --preflight  Read-only hardware/disk checks; no installation or report files.
+H3_TEST_TIMEOUT=600 optionally bounds model loading + generation to 600 seconds.
+HELP
+}
 [[ $# -le 1 ]] || { usage; exit 2; }
 case "${MODE}" in
-  all|--preflight|--setup|--download|--test) ;;
+  all|--prepare|--setup|--preflight|--download|--check|--test) ;;
   --help|-h) usage; exit 0 ;;
   *) usage; exit 2 ;;
 esac
-report_failure() {
-  local status="$1" line="$2"
-  echo "ERROR: stage=${STAGE:-bootstrap}, line=${line}, exit=${status}. See README.md troubleshooting." >&2
-  exit "${status}"
-}
-trap 'report_failure "$?" "$LINENO"' ERR
-
-# Validate the platform before any package-manager or filesystem mutation.
 STAGE=platform
+SECONDS=0
+STEP_STARTED=0
+REPORT_FILE=''
+finish() {
+  local code=$? result=FAIL
+  trap - EXIT
+  if ((code == 0)); then result=PASS; fi
+  if [[ -n "${REPORT_FILE}" ]]; then
+    {
+      printf 'mode=%s\nresult=%s\nexit_code=%s\nlast_stage=%s\nelapsed_seconds=%s\n' "${MODE}" "${result}" "${code}" "${STAGE}" "${SECONDS}"
+      printf 'log=%s\nstages=%s\n' "${LOG_FILE}" "${STAGES_FILE}"
+      if ((code == 0)) && [[ "${MODE}" == all || "${MODE}" == --test ]]; then
+        printf 'validated_output=%s\n' "${H3_OUTPUT}"
+      fi
+    } > "${REPORT_FILE}"
+    printf 'RESULT: %s; mode=%s; stage=%s; elapsed=%ss; report=%s\n' "${result}" "${MODE}" "${STAGE}" "${SECONDS}" "${REPORT_FILE}"
+    if ((code != 0)); then
+      printf '%s\t%s\tFAIL(%s)\n' "${STAGE}" "$((SECONDS - STEP_STARTED))" "${code}" >> "${STAGES_FILE}"
+      echo "Read the last stage in the log. Fix the cause and rerun the same mode; --test never downloads."
+    fi
+  fi
+  exit "${code}"
+}
+trap finish EXIT
+trap 'echo "ERROR: stage=${STAGE}, line=${LINENO}. See README.md." >&2' ERR
+trap 'exit 130' INT
+trap 'exit 143' TERM
+run_stage() {
+  STAGE="$1"
+  shift
+  STEP_STARTED=${SECONDS}
+  echo "== ${STAGE} =="
+  "$@"
+  if [[ -n "${REPORT_FILE}" ]]; then
+    printf '%s\t%s\tPASS\n' "${STAGE}" "$((SECONDS - STEP_STARTED))" >> "${STAGES_FILE}"
+  fi
+}
+
+# Validate OS before installation; prepare supports the same target OS without a GPU.
 [[ -r /etc/os-release ]] || fail "Ubuntu x86_64 is required"
 # shellcheck disable=SC1091
 source /etc/os-release
 [[ "${ID:-}" == ubuntu && "$(uname -m)" == x86_64 ]] || fail "Ubuntu x86_64 is required"
-H3_PYTHON="${H3_PYTHON:-python3}"
-command -v "${H3_PYTHON}" >/dev/null || fail "Install Python 3.11–3.13; Ubuntu 24.04 supplies Python 3.12"
-"${H3_PYTHON}" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else "Python 3.11–3.13 required; set H3_PYTHON to a supported interpreter")'
 VENV_DIR="${PROJECT_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
+# shellcheck source=scripts/environment.sh
+source "${PROJECT_DIR}/scripts/environment.sh"
+ALLOW_INSTALL=0
+NEED_GPU=0
+case "${MODE}" in all|--prepare|--setup) ALLOW_INSTALL=1 ;; esac
+case "${MODE}" in all|--check|--test|--preflight) NEED_GPU=1 ;; esac
+
+if [[ "${MODE}" != --preflight ]]; then
+  command -v flock >/dev/null || fail "flock missing; install util-linux"
+  exec 9>"${PROJECT_DIR}/.cache-deploy.lock"
+  flock -n 9 || fail "Another deployment/generation is running in this checkout"
+  mkdir -p logs
+  LOG_FILE="${PROJECT_DIR}/logs/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
+  REPORT_FILE="${LOG_FILE%.log}-result.txt"
+  STAGES_FILE="${LOG_FILE%.log}-stages.tsv"
+  printf 'stage\tseconds\tresult\n' > "${STAGES_FILE}"
+  exec > >(tee -a "${LOG_FILE}") 2>&1
+  echo "Deployment log: ${LOG_FILE}"
+fi
+run_stage python-selection select_python "${ALLOW_INSTALL}"
+echo "Selected Python: ${H3_PYTHON}"
+
 export HF_HOME="${H3_HF_HOME:-${HF_HOME:-${PROJECT_DIR}/.cache/huggingface}}"
 export HF_HUB_CACHE="${HF_HOME}/hub"
 export PIP_CACHE_DIR="${H3_PIP_CACHE:-${PROJECT_DIR}/.cache/pip}"
-export PYTHONUNBUFFERED=1
-export PYTHONNOUSERSITE=1
-# A UUID avoids differences between nvidia-smi and CUDA device enumeration order.
-if [[ -n "${H3_GPU_INDEX:-}" ]]; then
-  GPU_SELECTOR="${H3_GPU_INDEX}"
-elif [[ -n "${CUDA_VISIBLE_DEVICES+x}" ]]; then
-  GPU_SELECTOR="${CUDA_VISIBLE_DEVICES}"
-else
-  GPU_SELECTOR=0
-fi
-[[ -n "${GPU_SELECTOR}" && "${GPU_SELECTOR}" != *,* && "${GPU_SELECTOR}" != -1 ]] || fail "Select exactly one full GPU with H3_GPU_INDEX (index or GPU UUID)"
-command -v nvidia-smi >/dev/null || fail "NVIDIA driver / nvidia-smi missing; install the host driver first"
-GPU_UUID="$(nvidia-smi -i "${GPU_SELECTOR}" --query-gpu=uuid --format=csv,noheader)"
-[[ "${GPU_UUID}" == GPU-* && "${GPU_UUID}" != *$'\n'* ]] || fail "A single full GPU is required; MIG is not supported by this profile"
-export CUDA_VISIBLE_DEVICES="${GPU_UUID}"
+export PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1
 H3_OUTPUT="${H3_OUTPUT:-${PROJECT_DIR}/outputs/smoke-test.mp4}"
 H3_PROMPT="${H3_PROMPT:-A red fox walks through a snowy pine forest, with wind and footsteps audible.}"
+H3_TEST_TIMEOUT="${H3_TEST_TIMEOUT:-0}"
+[[ "${H3_TEST_TIMEOUT}" =~ ^(0|[1-9][0-9]{0,6})$ ]] || fail "H3_TEST_TIMEOUT must be an integer from 0 to 9999999 seconds"
+# Zero means no deadline; never promise a generation duration before GPU measurements.
+if ((H3_TEST_TIMEOUT > 0)); then command -v timeout >/dev/null || fail "timeout missing; install coreutils"; fi
 
-STAGE=hardware
+select_gpu() {
+  local selector uuid
+  selector="${H3_GPU_INDEX:-${CUDA_VISIBLE_DEVICES-0}}"
+  [[ -n "${selector}" && "${selector}" != *,* && "${selector}" != -1 ]] || fail "Select one full GPU with H3_GPU_INDEX; multiple GPUs/MIG are unsupported"
+  command -v nvidia-smi >/dev/null || fail "Host NVIDIA driver / nvidia-smi missing; use --prepare to stage files without a GPU"
+  uuid="$(nvidia-smi -i "${selector}" --query-gpu=uuid --format=csv,noheader)"
+  [[ "${uuid}" == GPU-* && "${uuid}" != *$'\n'* ]] || fail "A single full GPU is required"
+  export CUDA_VISIBLE_DEVICES="${uuid}"
+}
 PREFLIGHT_FLAGS=()
-if [[ "${MODE}" == all || "${MODE}" == --setup || "${MODE}" == --preflight ]]; then
-  PREFLIGHT_FLAGS+=(--install)
+if ((ALLOW_INSTALL == 1)) || [[ "${MODE}" == --preflight ]]; then PREFLIGHT_FLAGS+=(--install); fi
+if ((NEED_GPU)); then
+  run_stage gpu-selection select_gpu
+  PREFLIGHT_FLAGS+=(--gpu "${CUDA_VISIBLE_DEVICES}")
+else
+  PREFLIGHT_FLAGS+=(--storage-only)
 fi
-"${H3_PYTHON}" preflight.py --gpu "${GPU_UUID}" --cache "${HF_HUB_CACHE}" --output "${H3_OUTPUT}" --environment "${PROJECT_DIR}" --pip-cache "${PIP_CACHE_DIR}" "${PREFLIGHT_FLAGS[@]}"
+run_stage preflight "${H3_PYTHON}" preflight.py --cache "${HF_HUB_CACHE}" --output "${H3_OUTPUT}" --environment "${PROJECT_DIR}" --pip-cache "${PIP_CACHE_DIR}" "${PREFLIGHT_FLAGS[@]}"
 if [[ "${MODE}" == --preflight ]]; then
-  echo "Hardware preflight passed. Dependencies, model access and GPU kernels have not been tested."
+  echo "Hardware preflight passed; dependencies, model access and CUDA kernels are not tested."
   exit 0
 fi
-
-# Serialize setup/download/generation within this checkout.
-command -v flock >/dev/null || fail "flock missing; install util-linux"
-exec 9>"${PROJECT_DIR}/.cache-deploy.lock"
-flock -n 9 || fail "Another deployment/generation is running in this checkout"
-mkdir -p logs
-LOG_FILE="${PROJECT_DIR}/logs/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-# Route pip's temporary downloads to a checked filesystem, not a small /tmp mount.
 export TMPDIR="${PROJECT_DIR}/.cache/tmp"
 mkdir -p "${TMPDIR}"
-echo "Deployment log: ${LOG_FILE}"
 
 install_system_packages() {
-  local packages=() apt_prefix=()
-  command -v git >/dev/null || packages+=(git)
+  local packages=()
   if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then packages+=(ffmpeg); fi
-  # venv --help does not check ensurepip, which Ubuntu packages separately.
+  if [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then packages+=(ca-certificates); fi
   if ! "${H3_PYTHON}" -c 'import venv, ensurepip' 2>/dev/null; then
     packages+=("$("${H3_PYTHON}" -c 'import sys; print("python%d.%d-venv" % sys.version_info[:2])')")
   fi
-  if ((${#packages[@]})); then
-    if ((EUID != 0)); then
-      command -v sudo >/dev/null || fail "sudo required to install: ${packages[*]}"
-      apt_prefix=(sudo)
-    fi
-    "${apt_prefix[@]}" apt-get update
-    "${apt_prefix[@]}" apt-get install -y --no-install-recommends ca-certificates "${packages[@]}"
-  fi
+  if ((${#packages[@]})); then apt_install "${packages[@]}"; fi
 }
-
 setup_env() {
-  STAGE=system-packages
-  install_system_packages
-  STAGE=python-environment
   if [[ -d "${VENV_DIR}" ]]; then
-    [[ -x "${PYTHON}" ]] || fail "Incomplete .venv; move it aside and rerun --setup"
-    [[ "$("${PYTHON}" -c 'import sys; print(sys.version_info[:2])')" == "$("${H3_PYTHON}" -c 'import sys; print(sys.version_info[:2])')" ]] || fail "Existing .venv uses another Python version; move it aside before reinstalling"
+    [[ -x "${PYTHON}" ]] || fail "Incomplete .venv; move it aside and rerun --prepare"
+    [[ "$("${PYTHON}" -c 'import sys; print(sys.version_info[:2])')" == "$("${H3_PYTHON}" -c 'import sys; print(sys.version_info[:2])')" ]] || fail ".venv and H3_PYTHON use different Python versions; move .venv aside to reinstall"
   else
     "${H3_PYTHON}" -m venv "${VENV_DIR}"
   fi
   "${PYTHON}" -m pip install --upgrade 'pip>=25,<27'
-  # Exact CUDA suffixes prevent the second resolver run from choosing PyPI CUDA 13 wheels.
   "${PYTHON}" -m pip install --prefer-binary -r requirements-torch.txt
   "${PYTHON}" -m pip install --prefer-binary -r requirements.txt
 }
-
 check_runtime() {
-  STAGE=runtime
-  [[ -x "${PYTHON}" ]] || fail "Virtual environment missing; run bash deploy.sh --setup"
+  local flags=()
+  [[ -x "${PYTHON}" ]] || fail "Run bash deploy.sh to install dependencies and download the model"
   "${PYTHON}" -m pip check
-  "${PYTHON}" verify_runtime.py
+  if ((NEED_GPU == 0)); then flags+=(--cpu); fi
+  "${PYTHON}" verify_runtime.py "${flags[@]}"
   "${PYTHON}" -m pip freeze > "${LOG_FILE%.log}-packages.txt"
 }
-
-download_model() {
-  STAGE=download
-  "${PYTHON}" download_model.py
+check_cache() {
+  "${PYTHON}" -c 'from download_model import local_snapshot; print("Complete local snapshot:", local_snapshot())'
 }
-
 test_generation() {
-  STAGE=generation
-  "${PYTHON}" generate.py --prompt "${H3_PROMPT}" --output "${H3_OUTPUT}" \
+  local prefix=()
+  if ((H3_TEST_TIMEOUT > 0)); then prefix=(timeout --signal=TERM --kill-after=15s "${H3_TEST_TIMEOUT}s"); fi
+  "${prefix[@]}" "${PYTHON}" generate.py --prompt "${H3_PROMPT}" --output "${H3_OUTPUT}" \
     --width 960 --height 544 --frames 124 --steps 9
-  echo "Smoke test passed: ${H3_OUTPUT}"
 }
 
+if ((ALLOW_INSTALL)); then
+  run_stage system-packages install_system_packages
+  run_stage dependencies setup_env
+fi
+if [[ "${MODE}" == --test || "${MODE}" == --check ]]; then
+  export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+fi
+run_stage runtime check_runtime
 case "${MODE}" in
-  --setup) setup_env; check_runtime ;;
-  --download) check_runtime; download_model ;;
-  --test) check_runtime; test_generation ;;
-  all) setup_env; check_runtime; download_model; test_generation ;;
+  all|--prepare|--download) run_stage download "${PYTHON}" download_model.py ;;
+esac
+case "${MODE}" in
+  all|--prepare|--download|--check|--test) run_stage cache check_cache ;;
+esac
+case "${MODE}" in
+  all|--test)
+    export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+    run_stage generation test_generation
+    echo "GPU smoke test passed: ${H3_OUTPUT}" ;;
+  --check) echo "READY: GPU runtime and cached files passed; full model inference is still untested." ;;
+  --prepare|--download) echo "PREPARED: no GPU inference performed. On the GPU server run --check, then --test." ;;
+  --setup) echo "SETUP: imports/codecs passed; model download and GPU inference are still pending." ;;
 esac
