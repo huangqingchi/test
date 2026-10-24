@@ -32,11 +32,12 @@
 - Windows 标准 Python：发现 60 项，实际通过 38 项；16 项 Linux 专属测试与 6 项需要 CPU 依赖的测试在该环境跳过。
 - 独立 CPU 依赖环境：6 项真实索引/媒体接口测试通过；另有运行库导入和 H.264/AAC 实际编码/解码通过。
 - Bash 语法、ShellCheck、diff 检查通过。
-- Linux 真实取消/后代进程测试和完整 Bash 编排：等待本次 Ubuntu CI 执行后更新记录；不能由 Windows skip 推断通过。
-- 首轮 Ubuntu CI 捕获到测试自身的 `/proc` 读取竞态：进程已经被回收时除了 FileNotFoundError，也可能返回 ProcessLookupError。测试已把两者均视为进程消失，仍会对存活进程失败；正在复跑验证。
+- Ubuntu CI 已全部通过：[运行 40125510003](https://github.com/huangqingchi/test/actions/runs/40125510003)，代码提交 `faac38e`。静态 job 实际通过 54 项非模型用例，CPU job 通过 6 项真实集成用例，合计 60 项。包括 Linux 真实取消、生成子进程回收、后代超时、Bash 编排与媒体接口。
+- 首轮 Ubuntu CI 捕获到测试自身的 `/proc` 读取竞态：进程已经被回收时除了 FileNotFoundError，也可能返回 ProcessLookupError。测试已把两者均视为进程消失，仍会对存活进程失败；修正后复跑通过。
+- 6 张 Mermaid 图已用 Mermaid 解析器验证；通用规范与项目 docs 的本地链接/代码块检查通过。
 - 目标 GPU 完整模型下载、权重加载、三流程推理、资源峰值及画质：**尚未执行**。
 
-当前 CI 分成静态/回归和 CPU 集成两个 job，理论合计执行 60 个独立用例，但以实际运行记录为准。无需为了文档更新再次下载约 196GiB 的模型或声称已经部署到目标服务器。
+当前 CI 分成静态/回归和 CPU 集成两个 job，结果以所链接的实际运行记录为准。无需为了文档更新再次下载约 196GiB 的模型或声称已经部署到目标服务器。
 
 ## 交付与后续优先级
 
