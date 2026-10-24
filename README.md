@@ -1,6 +1,10 @@
 # MiniMax-H3 单卡部署与验收
 
-本项目把官方 Diffusers 的 `t2va` 工作流封装成一条部署命令，生成带音频的 MP4。当前实现面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。
+**首要要求：部署的模型是 MiniMax-H3，模型仓库固定为 `MiniMaxAI/MiniMax-H3`。** 脚本必须从该仓库下载权重、在目标机器本地加载并测试；环境不满足时明确报错，不自动替换模型。
+
+当前已实现的是 MiniMax-H3 的 **文生音视频（`t2va`）** 部署与验收，使用 Diffusers 加载器，面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。Diffusers 是运行框架，不是另一个生成模型。
+
+当前脚本尚未实现首尾帧（`fl2va`）与多模态参考（`ref2va`）的输入、加载和验收入口。因此，“文生音视频流程完成”不能写成“MiniMax-H3 全部功能部署完成”。
 
 **验证状态：Windows 本地及 Ubuntu 24.04 CI 的依赖安装、CPU 导入/编解码、回归检查已通过；尚未在目标 GPU 服务器完成模型推理验收。** [Ubuntu CI 结果](https://github.com/huangqingchi/test/actions/runs/40109323527)。具体问题与扩展方案见 [AUDIT.md](AUDIT.md)。
 
@@ -10,6 +14,7 @@
 
 | 项目 | 本项目要求与说明 |
 | --- | --- |
+| 部署模型 | MiniMax-H3；固定模型 ID `MiniMaxAI/MiniMax-H3`，当前验收工作流为 `t2va` |
 | 系统 | 推荐 Ubuntu 24.04 x86_64；Windows 仅用于开发检查 |
 | Python | 稳定版 3.11–3.13；自动复用已有虚拟环境或兼容解释器，缺少时从现有 apt 源选择 Python + venv；源中无稳定版本则明确退出 |
 | GPU | 一张完整的 80GB 级显卡；检查总显存、空闲显存均至少 75,000MiB，并实际测试原生 BF16 与 CUDA attention |
@@ -58,7 +63,9 @@ bash deploy.sh
 
 依赖安装失败，修复网络后重跑 `--setup`。模型下载中断，重跑 `--download`；已完成文件按大小检查，缺失/截断文件继续处理。安装阶段需要额外磁盘余量，已有完整环境和模型时使用 `--test`，避免重新走安装检查。
 
-下载依据固定 revision 的文件清单计算空间，保留至少 20GiB 余量。当前文生音视频组件约 **134.16GiB**；未选择的原始权重、`transformer_ref` 等不会下载。清单校验覆盖存在性与文件大小，**不是逐文件 SHA256 复核**。
+下载依据固定 revision 的文件清单计算空间，保留至少 20GiB 余量。当前下载的是 **MiniMax-H3 文生音视频工作流的完整组件集合，约 134.16GiB**：`transformer`、`text_encoder`、`tokenizer`、`processor`、`vae`、`audio_vae`、`scheduler`、`audio_scheduler` 及模型索引。其中包含 H3 使用的文本编码器和音视频编解码组件；这些共同组成 H3 推理流程。
+
+此集合不包含 `ref2va` 使用的 `transformer_ref`，也不包含供其他框架读取的原始权重副本。按工作流选择组件与“替换生成模型”无关，但也不代表所有 H3 功能已支持。清单校验覆盖存在性与文件大小，**不是逐文件 SHA256 复核**。
 
 ## 版本与参数
 
