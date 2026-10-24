@@ -188,7 +188,7 @@ raise SystemExit(acceptance.run_acceptance(full=False, output=Path(sys.argv[2]),
                 try:
                     if state.read_text().split()[2] == "Z":
                         break
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     break
                 time.sleep(0.02)
             else:
