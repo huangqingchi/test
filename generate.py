@@ -1,4 +1,4 @@
-"""MiniMax-H3 t2va smoke generation using the official Diffusers ModularPipeline."""
+"""Run MiniMax-H3 t2va, fl2va or ref2va using the complete local model snapshot."""
 
 from __future__ import annotations
 
@@ -7,11 +7,17 @@ import os
 from pathlib import Path
 
 from download_model import local_snapshot
-from h3_config import MODEL_REVISION
+from h3_config import MODEL_REVISION, WORKFLOWS
 from verify_media import write_verified_video
+from workflow_inputs import load_inputs, validate_request
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate MiniMax-H3 video with audio")
+    parser.add_argument("--workflow", choices=WORKFLOWS, default="t2va")
+    parser.add_argument("--image", type=Path, help="fl2va first frame (local file)")
+    parser.add_argument("--last-image", type=Path, help="fl2va last frame (local file)")
+    parser.add_argument("--reference", nargs=2, action="append", default=[], metavar=("KIND", "PATH"),
+                        help="ref2va image/video/audio local file; repeat in the desired reference order")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--width", type=int, default=960)
@@ -21,6 +27,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args(argv)
     args.output = args.output.expanduser().resolve()
+    args.image = args.image.expanduser().resolve() if args.image else None
+    args.last_image = args.last_image.expanduser().resolve() if args.last_image else None
+    args.reference = [(kind, Path(path).expanduser().resolve()) for kind, path in args.reference]
+    try:
+        validate_request(args.workflow, args.image, args.last_image, args.reference)
+    except ValueError as exc:
+        parser.error(str(exc))
+    input_paths = [p for p in (args.image, args.last_image) if p] + [p for _, p in args.reference]
+    if args.output in input_paths:
+        parser.error("output must not overwrite an input media file")
     if not args.prompt.strip():
         parser.error("prompt must not be empty")
     if args.output.suffix.lower() != ".mp4":
@@ -40,6 +56,7 @@ def main() -> None:
     args = parse_args()
     # Check the cache before importing libraries that could otherwise initiate downloads.
     snapshot = local_snapshot()
+    inputs = load_inputs(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.output.exists() and not args.output.is_file():
         raise RuntimeError(f"Output is not a file: {args.output}")
@@ -56,11 +73,11 @@ def main() -> None:
     if not torch.cuda.is_bf16_supported(including_emulation=False):
         raise RuntimeError("The selected GPU does not support BF16")
 
-    # Only load the t2va transformer partition. The manager swaps components
-    # between host memory and the selected GPU as the workflow advances.
+    # The full model is on disk. Load only this request's partition into RAM;
+    # the next workflow runs in a separate process during acceptance testing.
     manager = ComponentsManager()
     pipe = ModularPipeline.from_pretrained(
-        str(snapshot), workflow="t2va", components_manager=manager, local_files_only=True
+        str(snapshot), workflow=args.workflow, components_manager=manager, local_files_only=True
     )
     # Override every component source explicitly: the repository indexes contain
     # remote model IDs with revision=null, even when the pipeline index is local.
@@ -68,7 +85,7 @@ def main() -> None:
                          pretrained_model_name_or_path=str(snapshot), revision=None)
     manager.enable_auto_cpu_offload(device="cuda", memory_reserve_margin="12GB")
 
-    print(f"Generating {args.width}x{args.height}, {args.frames} frames, grid points={args.steps}, seed={args.seed}, model={MODEL_REVISION}")
+    print(f"Generating workflow={args.workflow}, {args.width}x{args.height}, {args.frames} frames, grid points={args.steps}, seed={args.seed}, model={MODEL_REVISION}")
     with torch.inference_mode():
         result = pipe(
             prompt=args.prompt,
@@ -79,6 +96,7 @@ def main() -> None:
             generator=torch.Generator(device="cpu").manual_seed(args.seed),
             output_type="np",
             output=["videos", "audio", "sampling_rate"],
+            **inputs,
         )
 
     video = result["videos"][0]

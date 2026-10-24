@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import download_model
 from generate import parse_args
-from h3_config import COMPONENTS, GIB, MODEL_ID, MODEL_REVISION, ROOT_CONFIGS
+from h3_config import (COMPONENTS, GIB, MODEL_ID, MODEL_REVISION, ROOT_CONFIGS,
+                       MANIFEST_SCHEMA, MODEL_PROFILE, WEIGHT_COMPONENTS)
 import preflight
 from verify_media import write_verified_video
 
@@ -46,15 +47,17 @@ class ArgumentTests(unittest.TestCase):
 class CacheTests(unittest.TestCase):
     def files(self):
         return {**{name: 2 for name in ROOT_CONFIGS},
-                **{f"{name}/config.json": 2 for name in COMPONENTS}}
+                **{f"{name}/config.json": 2 for name in COMPONENTS},
+                **{f"{name}/model.safetensors": 2 for name in WEIGHT_COMPONENTS}}
 
-    def test_excludes_original_and_reference_weights(self):
+    def test_excludes_duplicate_formats_but_includes_both_transformers(self):
         for name in ["FL2VA/model.safetensors", "Ref2VA/model.safetensors",
-                     "transformer_ref/model.safetensors", "scripts/run.py", "README.md",
+                     "scripts/run.py", "README.md",
                      "transformer/../../escape", "/transformer/x", "transformer\\x"]:
             with self.subTest(name=name):
                 self.assertFalse(download_model.selected_file(name))
         self.assertTrue(download_model.selected_file("transformer/model-00001.safetensors"))
+        self.assertTrue(download_model.selected_file("transformer_ref/model-00001.safetensors"))
 
     def test_incomplete_snapshot_is_not_treated_as_downloaded(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -67,7 +70,7 @@ class CacheTests(unittest.TestCase):
     def test_manifest_requires_all_components(self):
         files = self.files()
         download_model.validate_manifest(files)
-        del files["vae/config.json"]
+        del files["scheduler/config.json"]
         with self.assertRaisesRegex(RuntimeError, "Missing component"):
             download_model.validate_manifest(files)
 
@@ -86,7 +89,8 @@ class CacheTests(unittest.TestCase):
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(b"{}")
-            manifest.write_text(json.dumps({"repo_id": MODEL_ID, "revision": MODEL_REVISION, "files": files}))
+            manifest.write_text(json.dumps({"repo_id": MODEL_ID, "revision": MODEL_REVISION, "files": files,
+                                              "schema": MANIFEST_SCHEMA, "profile": MODEL_PROFILE}))
             with patch.object(download_model, "cache_paths", return_value=(root, manifest)):
                 self.assertEqual(download_model.local_snapshot(), root.resolve())
                 (root / "vae/config.json").write_bytes(b"{")

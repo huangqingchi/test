@@ -7,20 +7,21 @@ MODE="${1:-all}"
 fail() { echo "ERROR: $*" >&2; exit 1; }
 usage() {
   cat <<'HELP'
-Usage: bash deploy.sh [--prepare|--setup|--download|--check|--test|--preflight|--help]
-  (no flag)    Adapt environment, download, then run GPU smoke test.
+Usage: bash deploy.sh [--prepare|--setup|--download|--check|--test|--test-all|--preflight|--help]
+  (no flag)    Adapt environment, download full H3, then test all three GPU workflows.
   --prepare    Install dependencies + download model ahead of time; no GPU required.
   --setup      Install dependencies and test imports/codecs; no GPU required.
   --download   Resume model download using existing environment; no GPU required.
   --check      Offline GPU/runtime/cache readiness check; no model weights loaded.
-  --test       Offline GPU generation + full MP4 validation; no install/download.
+  --test       Quick t2va GPU smoke test only; full H3 cache still required.
+  --test-all   Offline GPU tests for t2va, fl2va and mixed-media ref2va.
   --preflight  Read-only hardware/disk checks; no installation or report files.
-H3_TEST_TIMEOUT=600 optionally bounds model loading + generation to 600 seconds.
+H3_TEST_TIMEOUT=600 optionally bounds EACH workflow loading + generation to 600 seconds.
 HELP
 }
 [[ $# -le 1 ]] || { usage; exit 2; }
 case "${MODE}" in
-  all|--prepare|--setup|--preflight|--download|--check|--test) ;;
+  all|--prepare|--setup|--preflight|--download|--check|--test|--test-all) ;;
   --help|-h) usage; exit 0 ;;
   *) usage; exit 2 ;;
 esac
@@ -36,8 +37,11 @@ finish() {
     {
       printf 'mode=%s\nresult=%s\nexit_code=%s\nlast_stage=%s\nelapsed_seconds=%s\n' "${MODE}" "${result}" "${code}" "${STAGE}" "${SECONDS}"
       printf 'log=%s\nstages=%s\n' "${LOG_FILE}" "${STAGES_FILE}"
-      if ((code == 0)) && [[ "${MODE}" == all || "${MODE}" == --test ]]; then
-        printf 'validated_output=%s\n' "${H3_OUTPUT}"
+      if ((code == 0)) && [[ "${MODE}" == all || "${MODE}" == --test || "${MODE}" == --test-all ]]; then
+        printf 'validated_acceptance_report=%s\n' "${ACCEPTANCE_REPORT}"
+        if [[ "${MODE}" == --test ]]; then
+          printf 'validated_output=%s\n' "${H3_OUTPUT}"
+        fi
       fi
     } > "${REPORT_FILE}"
     printf 'RESULT: %s; mode=%s; stage=%s; elapsed=%ss; report=%s\n' "${result}" "${MODE}" "${STAGE}" "${SECONDS}" "${REPORT_FILE}"
@@ -75,7 +79,7 @@ source "${PROJECT_DIR}/scripts/environment.sh"
 ALLOW_INSTALL=0
 NEED_GPU=0
 case "${MODE}" in all|--prepare|--setup) ALLOW_INSTALL=1 ;; esac
-case "${MODE}" in all|--check|--test|--preflight) NEED_GPU=1 ;; esac
+case "${MODE}" in all|--check|--test|--test-all|--preflight) NEED_GPU=1 ;; esac
 
 if [[ "${MODE}" != --preflight ]]; then
   command -v flock >/dev/null || fail "flock missing; install util-linux"
@@ -97,11 +101,11 @@ export HF_HUB_CACHE="${HF_HOME}/hub"
 export PIP_CACHE_DIR="${H3_PIP_CACHE:-${PROJECT_DIR}/.cache/pip}"
 export PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1
 H3_OUTPUT="${H3_OUTPUT:-${PROJECT_DIR}/outputs/smoke-test.mp4}"
-H3_PROMPT="${H3_PROMPT:-A red fox walks through a snowy pine forest, with wind and footsteps audible.}"
+H3_PROMPT="${H3_PROMPT:-A red ball rolls slowly to the right across a pale floor, with gentle rolling sounds and a soft tone.}"
 H3_TEST_TIMEOUT="${H3_TEST_TIMEOUT:-0}"
 [[ "${H3_TEST_TIMEOUT}" =~ ^(0|[1-9][0-9]{0,6})$ ]] || fail "H3_TEST_TIMEOUT must be an integer from 0 to 9999999 seconds"
 # Zero means no deadline; never promise a generation duration before GPU measurements.
-if ((H3_TEST_TIMEOUT > 0)); then command -v timeout >/dev/null || fail "timeout missing; install coreutils"; fi
+
 
 select_gpu() {
   local selector uuid
@@ -158,19 +162,21 @@ check_runtime() {
 }
 check_cache() {
   "${PYTHON}" -c 'from download_model import local_snapshot; print("Complete local snapshot:", local_snapshot())'
+  "${PYTHON}" verify_model.py
 }
 test_generation() {
-  local prefix=()
-  if ((H3_TEST_TIMEOUT > 0)); then prefix=(timeout --signal=TERM --kill-after=15s "${H3_TEST_TIMEOUT}s"); fi
-  "${prefix[@]}" "${PYTHON}" generate.py --prompt "${H3_PROMPT}" --output "${H3_OUTPUT}" \
-    --width 960 --height 544 --frames 124 --steps 9
+  local scope=all
+  if [[ "${MODE}" == --test ]]; then scope=quick; fi
+  ACCEPTANCE_REPORT="${LOG_FILE%.log}-acceptance.json"
+  "${PYTHON}" acceptance.py --scope "${scope}" --output "${H3_OUTPUT}" \
+    --report "${ACCEPTANCE_REPORT}" --prompt "${H3_PROMPT}" --timeout "${H3_TEST_TIMEOUT}"
 }
 
 if ((ALLOW_INSTALL)); then
   run_stage system-packages install_system_packages
   run_stage dependencies setup_env
 fi
-if [[ "${MODE}" == --test || "${MODE}" == --check ]]; then
+if [[ "${MODE}" == --test || "${MODE}" == --test-all || "${MODE}" == --check ]]; then
   export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 fi
 run_stage runtime check_runtime
@@ -178,14 +184,14 @@ case "${MODE}" in
   all|--prepare|--download) run_stage download "${PYTHON}" download_model.py ;;
 esac
 case "${MODE}" in
-  all|--prepare|--download|--check|--test) run_stage cache check_cache ;;
+  all|--prepare|--download|--check|--test|--test-all) run_stage cache check_cache ;;
 esac
 case "${MODE}" in
-  all|--test)
+  all|--test|--test-all)
     export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
     run_stage generation test_generation
-    echo "GPU smoke test passed: ${H3_OUTPUT}" ;;
+    echo "GPU acceptance passed for the selected scope; see ${ACCEPTANCE_REPORT}" ;;
   --check) echo "READY: GPU runtime and cached files passed; full model inference is still untested." ;;
-  --prepare|--download) echo "PREPARED: no GPU inference performed. On the GPU server run --check, then --test." ;;
+  --prepare|--download) echo "PREPARED: no GPU inference performed. On the GPU server run --check, then --test-all (--test is a quick t2va-only check)." ;;
   --setup) echo "SETUP: imports/codecs passed; model download and GPU inference are still pending." ;;
 esac

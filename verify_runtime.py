@@ -34,7 +34,9 @@ def check_imports_and_media() -> None:
     import torch
     import torchvision
     from diffusers import ComponentsManager, ModularPipeline
-    from diffusers.modular_pipelines.minimax_h3 import MiniMaxH3Blocks
+    from diffusers.modular_pipelines.minimax_h3 import (
+        MiniMaxH3Blocks, MiniMaxH3ImageReference, MiniMaxH3VideoReference, MiniMaxH3AudioReference,
+    )
     from diffusers.utils.export_utils import encode_video
     from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 
@@ -43,6 +45,8 @@ def check_imports_and_media() -> None:
     # Force lazy class imports and instantiate only blocks, never weights.
     assert ComponentsManager and ModularPipeline and Qwen3VLForConditionalGeneration and Qwen3VLProcessor
     MiniMaxH3Blocks()
+    assert all(hasattr(cls, "from_file") for cls in
+               (MiniMaxH3ImageReference, MiniMaxH3VideoReference, MiniMaxH3AudioReference))
     torchvision.ops.nms(torch.tensor([[0., 0., 2., 2.]]), torch.tensor([1.]), 0.5)
     for name in ("torch", "torchvision", "diffusers", "transformers", "huggingface_hub", "av"):
         print(f"{name}=={importlib.metadata.version(name)}")

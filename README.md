@@ -2,11 +2,11 @@
 
 **首要要求：部署的模型是 MiniMax-H3，模型仓库固定为 `MiniMaxAI/MiniMax-H3`。** 脚本必须从该仓库下载权重、在目标机器本地加载并测试；环境不满足时明确报错，不自动替换模型。
 
-当前已实现的是 MiniMax-H3 的 **文生音视频（`t2va`）** 部署与验收，使用 Diffusers 加载器，面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。Diffusers 是运行框架，不是另一个生成模型。
+当前部署覆盖 MiniMax-H3 公开本地模型的三个工作流：**文生音视频 `t2va`、首帧/尾帧/首尾帧 `fl2va`、图像/视频/音频参考 `ref2va`**。下载两套生成权重和全部共享组件，使用 Diffusers 加载器，面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。
 
-当前脚本尚未实现首尾帧（`fl2va`）与多模态参考（`ref2va`）的输入、加载和验收入口。因此，“文生音视频流程完成”不能写成“MiniMax-H3 全部功能部署完成”。
+默认命令会依次测试三个工作流；单独的 `--test` 是快速文生音视频测试，不能代表全流程验收。官方尚未公开本地权重的 H3-Context-IR / H3-Regenerate-2K 托管模块不属于本地模型部署；也不把这些 API 服务写成已部署。[官方公开范围说明](https://github.com/MiniMax-AI/MiniMax-H3)
 
-**验证状态：Windows 本地及 Ubuntu 24.04 CI 的依赖安装、CPU 导入/编解码、回归检查已通过；尚未在目标 GPU 服务器完成模型推理验收。** [Ubuntu CI 结果](https://github.com/huangqingchi/test/actions/runs/40109323527)。具体问题与扩展方案见 [AUDIT.md](AUDIT.md)。
+**验证边界：本地/CI 检查覆盖依赖、脚本编排、缓存升级、全部工作流索引及真实媒体读取/编解码；没有在目标 GPU 上加载完整权重执行生成。** [最新 CI 结果](https://github.com/huangqingchi/test/actions)。服务器须用 `--test-all` 完成实际验收；具体检查记录见 [AUDIT.md](AUDIT.md)。
 
 **现有目标机器上的交付入口是 `bash deploy.sh`：自动适配环境、下载模型、部署并实际测试。** 不要求事先准备模型或另一台机器。分阶段命令用于失败后的续跑，详见 [交付步骤 HANDOFF.md](HANDOFF.md)。
 
@@ -14,13 +14,13 @@
 
 | 项目 | 本项目要求与说明 |
 | --- | --- |
-| 部署模型 | MiniMax-H3；固定模型 ID `MiniMaxAI/MiniMax-H3`，当前验收工作流为 `t2va` |
+| 部署模型 | MiniMax-H3；固定 ID `MiniMaxAI/MiniMax-H3`，覆盖 `t2va`、`fl2va`、`ref2va` |
 | 系统 | 推荐 Ubuntu 24.04 x86_64；Windows 仅用于开发检查 |
 | Python | 稳定版 3.11–3.13；自动复用已有虚拟环境或兼容解释器，缺少时从现有 apt 源选择 Python + venv；源中无稳定版本则明确退出 |
 | GPU | 一张完整的 80GB 级显卡；检查总显存、空闲显存均至少 75,000MiB，并实际测试原生 BF16 与 CUDA attention |
 | 驱动 | 预装宿主机 NVIDIA 驱动；CUDA 12.x 兼容下限 525.60.13，CUDA 12.8 建议 570.26+，新架构还需相应驱动；以实际内核运行为准 |
 | 内存 | **可用**主机/容器内存至少 150GiB；建议配置 192GiB 或更多。不能用 swap 替代；容器限额会参与检查 |
-| 磁盘 | 建议首次准备至少 220GiB 空闲空间，覆盖模型、虚拟环境、pip 缓存、临时文件和产物；允许分盘存放 |
+| 磁盘 | 建议首次准备至少 300GiB 空闲空间；完整 Diffusers 模型约 195.89GiB，加虚拟环境、缓存、临时文件和三个流程的产物；允许分盘存放 |
 | 网络 | 安装时访问 Ubuntu 软件源、PyPI、PyTorch wheel 源、GitHub codeload；下载模型时访问 Hugging Face 及其文件传输端点 |
 
 显存/内存阈值是当前部署方案的保守门槛，不是模型的最低硬件需求，也不能保证任意分辨率不发生 OOM。驱动依据：[NVIDIA CUDA 12.8 release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html)。
@@ -35,9 +35,9 @@ cd minimax-h3-demo
 bash deploy.sh
 ```
 
-执行顺序：平台检查 → 自动选择/安装兼容 Python → 资源检查 → 系统包与虚拟环境 → 固定依赖 → CUDA/编码小测试 → 下载指定模型组件 → 生成 → 完整解码验收。
+执行顺序：平台检查 → 自动选择/安装兼容 Python → 资源检查 → 系统包与虚拟环境 → 固定依赖 → CUDA/编码小测试 → 下载完整 H3 Diffusers 权重 → 检查三个本地工作流 → 依次生成三个音视频 → 完整解码验收。
 
-缺少系统包时脚本使用 `apt-get`，非 root 用户需已具备非交互 sudo 权限，或事先在终端执行 `sudo -v`；不具备时脚本立即报错。脚本不会安装 NVIDIA 驱动或替换系统 Python。默认产物为 `outputs/smoke-test.mp4`，运行日志、阶段耗时、结果报告和完整的已安装依赖清单写入 `logs/`。Python 包候选以实际配置的软件源为准；推荐的 [Ubuntu 24.04 提供 Python 3.12 venv 包](https://packages.ubuntu.com/noble/python3.12-venv)。
+缺少系统包时脚本使用 `apt-get`，非 root 用户需已具备非交互 sudo 权限，或事先在终端执行 `sudo -v`；不具备时脚本立即报错。脚本不会安装 NVIDIA 驱动或替换系统 Python。完整验收产物位于 `outputs/h3-full-<本次运行ID>/`，含三个 MP4 和自动生成的输入素材；准确路径记录在 `logs/*-acceptance.json`。运行日志、阶段耗时、结果报告和依赖清单也写入 `logs/`。Python 包候选以实际配置的软件源为准；推荐的 [Ubuntu 24.04 提供 Python 3.12 venv 包](https://packages.ubuntu.com/noble/python3.12-venv)。
 
 若项目目录磁盘较小，可使用绝对路径指定缓存：
 
@@ -54,18 +54,21 @@ bash deploy.sh
 
 | 命令 | 行为 |
 | --- | --- |
-| `bash deploy.sh --prepare` | 自动适配环境、检查 CPU 导入/编解码并下载模型；无 GPU/推理 RAM 要求，用于测试前准备 |
+| `bash deploy.sh --prepare` | 自动适配环境、检查 CPU 导入/编解码并下载完整模型；无 GPU/推理 RAM 要求 |
 | `bash deploy.sh --preflight` | 只读平台/资源检查，不安装、不下载；无法证明依赖或模型可运行 |
 | `bash deploy.sh --setup` | 自动选择/安装 Python，安装系统包和依赖，测试 CPU 导入/编解码；不需要 GPU、不下载模型 |
-| `bash deploy.sh --download` | 使用已有环境，下载并校验固定版本组件；无 GPU 要求，中断后可重跑 |
-| `bash deploy.sh --check` | 离线 GPU/资源/依赖/编解码/缓存检查；不加载模型权重，不安装、不下载 |
-| `bash deploy.sh --test` | 使用已有环境和已校验模型，离线生成与验收；不会自动补下载 |
+| `bash deploy.sh --download` | 使用已有环境，补齐并校验两套权重和共享组件；无 GPU 要求，中断后可重跑 |
+| `bash deploy.sh --check` | 离线 GPU/资源/依赖/完整缓存/三个工作流索引检查；不加载权重、不安装、不下载 |
+| `bash deploy.sh --test` | 快速测试：只做 t2va 生成；仍要求完整模型清单，不代表全部工作流通过 |
+| `bash deploy.sh --test-all` | 完整测试：依次运行 t2va、首尾帧 fl2va、图像+视频+音频混合 ref2va；自动生成输入素材，不安装、不下载 |
 
-依赖安装失败，修复网络后重跑 `--setup`。模型下载中断，重跑 `--download`；已完成文件按大小检查，缺失/截断文件继续处理。安装阶段需要额外磁盘余量，已有完整环境和模型时使用 `--test`，避免重新走安装检查。
+依赖安装失败，修复网络后重跑 `--setup`。模型下载中断，重跑 `--download`；已完成文件按大小检查，缺失/截断文件继续处理。已有完整环境和模型时使用 `--test-all`，避免重新走安装检查；测试时间紧时可以明确选择 `--test`，但报告不会写成全部流程已通过。
 
-下载依据固定 revision 的文件清单计算空间，保留至少 20GiB 余量。当前下载的是 **MiniMax-H3 文生音视频工作流的完整组件集合，约 134.16GiB**：`transformer`、`text_encoder`、`tokenizer`、`processor`、`vae`、`audio_vae`、`scheduler`、`audio_scheduler` 及模型索引。其中包含 H3 使用的文本编码器和音视频编解码组件；这些共同组成 H3 推理流程。
+下载依据固定 revision 的文件清单计算空间，保留至少 20GiB 余量。下载 **MiniMax-H3 完整 Diffusers 组件集合，约 195.89GiB**：`transformer`、`transformer_ref`、`text_encoder`、`tokenizer`、`processor`、`vae`、`audio_vae`、`scheduler`、`audio_scheduler` 及模型索引。文生/首尾帧使用第一套 transformer，参考生成使用第二套，其余组件共享。[官方工作流与组件说明](https://huggingface.co/docs/diffusers/main/en/api/pipelines/minimax_h3)
 
-此集合不包含 `ref2va` 使用的 `transformer_ref`，也不包含供其他框架读取的原始权重副本。按工作流选择组件与“替换生成模型”无关，但也不代表所有 H3 功能已支持。清单校验覆盖存在性与文件大小，**不是逐文件 SHA256 复核**。
+不重复下载供其他框架读取的原始格式副本，两套生成权重在当前格式中均已包含。每次推理只把当前任务的组件加载到 RAM；完整验收按进程顺序执行，避免两套权重同时驻留。大量参考素材仍可能增加显存/内存峰值。清单校验覆盖存在性与文件大小，**不是逐文件 SHA256 复核**。
+
+从旧版 t2va-only 部署升级：运行 `bash deploy.sh --download`。原有 snapshot 文件复用，主要补下载约 61.73GiB 的 `transformer_ref`。完整部署使用新的 `h3-full-diffusers` 清单，旧清单即使被复制/改名，也不能通过完整检查。
 
 ## 版本与参数
 
@@ -82,9 +85,9 @@ PyTorch/torchvision 固定为 `2.11.0+cu128` / `0.26.0+cu128`，必须成对安�
 | `H3_GPU_INDEX` | GPU 序号或完整 UUID；优先于已有 `CUDA_VISIBLE_DEVICES`。最终转换为 UUID，避免选错卡 |
 | `H3_HF_HOME` | 模型缓存根目录；未设置则使用 `HF_HOME` 或项目下 `.cache/huggingface` |
 | `H3_PIP_CACHE` | pip 下载缓存；默认项目下 `.cache/pip` |
-| `H3_OUTPUT` | MP4 输出路径，建议绝对路径 |
+| `H3_OUTPUT` | 快速测试 MP4 路径；完整验收在它的父目录创建独立的 `h3-full-*` 目录 |
 | `H3_PROMPT` | 一键测试的文本提示词 |
-| `H3_TEST_TIMEOUT` | 模型加载、生成与输出验证阶段的时限，秒；默认 0 不限时，例如 600。超时算失败，不是成功验收 |
+| `H3_TEST_TIMEOUT` | 每个工作流子进程的加载/生成/输出验证时限，秒；默认 0 不限时。三个流程各自计时，超时退出 124 并停止后续流程 |
 | `HF_TOKEN` | 模型访问需要认证时设置；不要写入仓库或命令行参数 |
 
 直接调整生成参数，先确保缓存环境变量一致并选择一张 GPU：
@@ -93,16 +96,39 @@ PyTorch/torchvision 固定为 `2.11.0+cu128` / `0.26.0+cu128`，必须成对安�
 export HF_HOME=/data/h3-model-cache
 export CUDA_VISIBLE_DEVICES=0
 .venv/bin/python generate.py \
+  --workflow t2va \
   --prompt 'A red fox walks through snow, with wind and footsteps audible.' \
   --output outputs/custom.mp4 --width 960 --height 544 \
   --frames 124 --steps 9 --seed 42
 ```
+
+首尾帧（可只传 `--image` 或只传 `--last-image`）：
+
+```bash
+.venv/bin/python generate.py --workflow fl2va \
+  --prompt 'The red ball rolls from left to right.' \
+  --image /data/first.png --last-image /data/last.png --output outputs/keyframes.mp4
+```
+
+混合参考（重复 `--reference 类型 路径`；引用顺序保持不变）：
+
+```bash
+.venv/bin/python generate.py --workflow ref2va \
+  --prompt 'Follow the reference appearance, motion and sound.' \
+  --reference image /data/subject.png \
+  --reference video /data/motion.mp4 \
+  --reference audio /data/sound.wav --output outputs/references.mp4
+```
+
+输入必须是非空本地文件，不能传 URL。参考上限是 9 张图、3 段视频、3 段音频，合计 12 个；音频需搭配至少一个图像或视频参考。音视频每段 2–15 秒，同类总时长不超过 15 秒（允许编码 padding 的小幅容差）。加载模型前校验并解码媒体，保留视频帧率与音频采样率。参考分辨率/时长越大，资源需求越高。
 
 直接运行 Python 会绕过 shell 的资源预检和并发锁，请自行确保 GPU 空闲。分辨率须为 32 的倍数；本封装接受 124、141……345 帧。默认测试约 5.17 秒，9 个采样网格点对应 8 次模型求值，主要验证流程，不能代表正式画质。有关模型参数与不同显存配置见 [Diffusers H3 文档](https://huggingface.co/docs/diffusers/main/en/api/pipelines/minimax_h3)。
 
 ## 验收与常见失败
 
 成功要求：进程退出码 0；MP4 完整可解码；H.264 视频尺寸、24fps、帧数符合请求；AAC 音频为 32kHz 双声道，时长与视频相差不超过 0.15 秒。生成先写临时文件，验证通过才替换目标文件；失败时保留之前的成功产物。结构验证不判断内容质量、对白准确性或主观音画同步。
+
+完整验收还要求 `*-acceptance.json` 中三个工作流均为 `passed`，且 `all_workflows_passed=true`。快速测试的 `scope=quick-t2va-only`、其余流程为 `not_run`。任何失败/超时会停止后续执行并保留逐流程状态；不能用上一次的样片作为这次成功证据。自动生成的简单测试素材只用于验证接口和流程，不代表生产画质测试。
 
 | 现象 | 排查方法 |
 | --- | --- |
@@ -131,4 +157,4 @@ shellcheck -x deploy.sh scripts/environment.sh
 python verify_runtime.py --cpu
 ```
 
-[CI 配置](.github/workflows/checks.yml)在 Ubuntu 上运行无 GPU 回归和 CPU 导入/编码测试。CI 通过不代表 80GB GPU 推理验收通过。项目只实现命令行文生音视频；图生视频、参考视频、API 服务的扩展边界见 [AUDIT.md](AUDIT.md)。
+[CI 配置](.github/workflows/checks.yml)在 Ubuntu 上运行无 GPU 回归、三个工作流的离线索引路由、真实首尾帧/混合参考解码及 CPU 编解码测试。CI 通过不代表 80GB GPU 推理验收通过。项目提供三个工作流的命令行入口；常驻 API、Docker、小显存量化仍不在当前实现内。

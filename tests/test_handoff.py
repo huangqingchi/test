@@ -64,7 +64,7 @@ if [[ "$1" == -m && "$2" == venv ]]; then
   mkdir -p "$3/bin"
   cp "$0" "$3/bin/python"
 fi
-if [[ "$1" == generate.py ]]; then
+if [[ "$1" == acceptance.py ]]; then
   if [[ "${SLOW_GENERATE:-0}" == 1 ]]; then sleep 10; fi
   exit "${FAIL_GENERATE:-0}"
 fi
@@ -98,7 +98,7 @@ exit 0
         self.assertIn("--storage-only", trace)
         self.assertIn("verify_runtime.py --cpu", trace)
         self.assertIn("download_model.py", trace)
-        self.assertNotIn("generate.py", trace)
+        self.assertNotIn("acceptance.py", trace)
         self.assertIn("result=PASS", self.report())
         self.assertNotIn("validated_output=", self.report())
 
@@ -111,10 +111,11 @@ exit 0
         self.assertIn("pip install", trace)
         self.assertIn("GPU QUERY", trace)
         self.assertLess(trace.index("verify_runtime.py"), trace.index("download_model.py"))
-        self.assertLess(trace.index("download_model.py"), trace.index("generate.py"))
+        self.assertLess(trace.index("download_model.py"), trace.index("acceptance.py"))
         self.assertIn("mode=all", self.report())
         self.assertIn("result=PASS", self.report())
-        self.assertIn("validated_output=", self.report())
+        self.assertIn("validated_acceptance_report=", self.report())
+        self.assertIn("acceptance.py --scope all", trace)
 
     def test_test_never_installs_or_downloads(self):
         result = self.run_mode("--test")
@@ -122,7 +123,7 @@ exit 0
         trace = self.trace.read_text()
         self.assertIn("GPU QUERY", trace)
         self.assertIn("cache offline=1", trace)
-        self.assertIn("generate.py", trace)
+        self.assertIn("acceptance.py", trace)
         self.assertNotIn("pip install", trace)
         self.assertNotIn("download_model.py", trace)
         self.assertNotIn("APT", trace)
@@ -133,14 +134,14 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         trace = self.trace.read_text()
         self.assertIn("cache offline=1", trace)
-        self.assertNotIn("generate.py", trace)
+        self.assertNotIn("acceptance.py", trace)
         self.assertNotIn("pip install", trace)
         self.assertNotIn("validated_output=", self.report())
 
     def test_missing_cache_fails_before_generation_with_report(self):
         result = self.run_mode("--test", FAIL_CACHE="9")
         self.assertEqual(result.returncode, 9, result.stdout + result.stderr)
-        self.assertNotIn("generate.py", self.trace.read_text())
+        self.assertNotIn("acceptance.py", self.trace.read_text())
         self.assertIn("last_stage=cache", self.report())
         self.assertIn("result=FAIL", self.report())
 
@@ -150,11 +151,19 @@ exit 0
         self.assertIn("last_stage=generation", self.report())
         self.assertNotIn("validated_output=", self.report())
 
-    def test_generation_deadline_stops_job(self):
-        result = self.run_mode("--test", SLOW_GENERATE="1", H3_TEST_TIMEOUT="1")
-        self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
-        self.assertIn("exit_code=124", self.report())
-        self.assertIn("last_stage=generation", self.report())
+    def test_generation_deadline_is_forwarded_per_workflow(self):
+        result = self.run_mode("--test", H3_TEST_TIMEOUT="600")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("--timeout 600", self.trace.read_text())
+
+    def test_full_test_runs_all_workflows_without_install_or_download(self):
+        result = self.run_mode("--test-all")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        trace = self.trace.read_text()
+        self.assertIn("acceptance.py --scope all", trace)
+        self.assertNotIn("pip install", trace)
+        self.assertNotIn("download_model.py", trace)
+        self.assertIn("validated_acceptance_report=", self.report())
 
     def test_preflight_writes_no_logs_or_locks(self):
         result = self.run_mode("--preflight")

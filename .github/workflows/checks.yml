@@ -26,3 +26,4 @@ jobs:
           pip install -r /tmp/h3-cpu-requirements.txt
           pip check
       - run: python verify_runtime.py --cpu
+      - run: python -m unittest discover -s tests -p test_cpu_integration.py -v

@@ -1,4 +1,4 @@
-"""Download only the pinned t2va components; never treat a snapshot directory as proof of completeness."""
+"""Download the complete pinned H3 Diffusers model, including both transformer partitions."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
 
-from h3_config import COMPONENTS, GIB, MODEL_ID, MODEL_REVISION, ROOT_CONFIGS
+from h3_config import (COMPONENTS, GIB, MANIFEST_SCHEMA, MODEL_ID, MODEL_PROFILE,
+                       MODEL_REVISION, ROOT_CONFIGS, WEIGHT_COMPONENTS)
 
 
 def selected_file(name: str) -> bool:
@@ -27,6 +28,9 @@ def validate_manifest(files: dict[str, int]) -> None:
     for component in COMPONENTS:
         if not any(name.startswith(component + "/") for name in files):
             raise RuntimeError(f"Missing component in manifest: {component}")
+    for component in WEIGHT_COMPONENTS:
+        if not any(name.startswith(component + "/") and name.endswith(".safetensors") for name in files):
+            raise RuntimeError(f"Missing weights in manifest: {component}")
 
 
 def missing_files(snapshot: Path, files: dict[str, int]) -> dict[str, int]:
@@ -40,7 +44,7 @@ def cache_paths() -> tuple[Path, Path]:
 
     cache = Path(HF_HUB_CACHE)
     repo = cache / ("models--" + MODEL_ID.replace("/", "--"))
-    return repo / "snapshots" / MODEL_REVISION, repo / f"h3-t2va-{MODEL_REVISION}.json"
+    return repo / "snapshots" / MODEL_REVISION, repo / f"{MODEL_PROFILE}-{MODEL_REVISION}.json"
 
 
 def local_snapshot() -> Path:
@@ -50,6 +54,8 @@ def local_snapshot() -> Path:
     data = json.loads(manifest.read_text(encoding="utf-8"))
     if data.get("repo_id") != MODEL_ID or data.get("revision") != MODEL_REVISION:
         raise RuntimeError("Cached manifest belongs to another model revision")
+    if data.get("schema") != MANIFEST_SCHEMA or data.get("profile") != MODEL_PROFILE:
+        raise RuntimeError("Full H3 manifest required; rerun --download to upgrade the partial cache")
     files = data["files"]
     validate_manifest(files)
     missing = missing_files(snapshot, files)
@@ -75,7 +81,7 @@ def download() -> Path:
     # Conservatively budget the full size of incomplete files; never trust a .incomplete blob.
     required = sum(missing.values()) + 20 * GIB
     free = shutil.disk_usage(cache).free
-    print(f"Pinned t2va files: {sum(files.values())/GIB:.2f} GiB; missing/incomplete: {sum(missing.values())/GIB:.2f} GiB; free: {free/GIB:.2f} GiB")
+    print(f"Full MiniMax-H3 (t2va/fl2va/ref2va): {sum(files.values())/GIB:.2f} GiB; missing/incomplete: {sum(missing.values())/GIB:.2f} GiB; free: {free/GIB:.2f} GiB")
     if free < required:
         raise RuntimeError(f"Cache needs {required/GIB:.2f} GiB free including reserve; choose H3_HF_HOME on a larger disk")
     # Sequential large-file downloads limit peak temporary space. Hub resumes interrupted blobs.
@@ -88,7 +94,8 @@ def download() -> Path:
     if missing_files(snapshot, files):
         raise RuntimeError("Model download incomplete; rerun --download to resume")
     manifest.parent.mkdir(parents=True, exist_ok=True)
-    data = {"repo_id": MODEL_ID, "revision": MODEL_REVISION, "files": files}
+    data = {"repo_id": MODEL_ID, "revision": MODEL_REVISION, "files": files,
+            "schema": MANIFEST_SCHEMA, "profile": MODEL_PROFILE}
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=manifest.parent, delete=False) as stream:
         temporary = Path(stream.name)
         json.dump(data, stream, indent=2)
