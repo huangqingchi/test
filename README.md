@@ -2,7 +2,7 @@
 
 本项目把官方 Diffusers 的 `t2va` 工作流封装成一条部署命令，生成带音频的 MP4。当前实现面向 **Ubuntu x86_64 + 单张 80GB 级 NVIDIA GPU + BF16/CPU 卸载**。
 
-**验证状态：依赖安装、CPU 导入/编解码、回归测试已通过；尚未在目标 Ubuntu GPU 服务器完成模型推理验收。** 具体问题与扩展方案见 [AUDIT.md](AUDIT.md)。
+**验证状态：Windows 本地及 Ubuntu 24.04 CI 的依赖安装、CPU 导入/编解码、回归检查已通过；尚未在目标 GPU 服务器完成模型推理验收。** [Ubuntu CI 结果](https://github.com/huangqingchi/test/actions/runs/40109323527)。具体问题与扩展方案见 [AUDIT.md](AUDIT.md)。
 
 ## 环境要求
 

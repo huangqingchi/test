@@ -59,7 +59,9 @@ vLLM-Omni recipe 特别提示其 H3 镜像 tag 与当前模块化实现存在时
 - 对固定模型索引和模拟本地组件文件布局做了离线解析，t2va 仅引用八个目标组件；未加载权重。
 - 已核对官方 cu128 索引中 Python 3.11/3.12/3.13 的 Linux x86_64 torch/torchvision wheel 存在；并未在本地安装这些 Linux CUDA wheel。
 
-尚需目标服务器完成：Ubuntu 系统包安装、Linux CUDA 依赖解析和内核检查、完整模型下载、BF16 加载/CPU 卸载、真实视频生成、峰值内存/显存、耗时和画质验收。CI 文件已添加，尚不能据此声称 GitHub 上的 CI 已运行。
+GitHub Actions 的 Ubuntu 24.04/Python 3.12 检查也已全部通过：Bash/ShellCheck/14 项回归，以及固定依赖安装、`pip check`、H3 导入与实际 CPU 编解码。[运行记录：40109323527，代码提交 c22d83a](https://github.com/huangqingchi/test/actions/runs/40109323527)。CI 使用 CPU wheel，不是 CUDA 推理测试。
+
+尚需目标服务器完成：Ubuntu 系统包安装、Linux CUDA 依赖解析和内核检查、完整模型下载、BF16 加载/CPU 卸载、真实视频生成、峰值内存/显存、耗时和画质验收。
 
 仍存在的边界：直接依赖已固定但间接依赖尚未形成完整 hash lock；缓存校验不覆盖同大小的内容损坏；资源预检与实际加载之间可能有其他任务抢占；高分辨率/长视频仍可能 OOM；本地 shell 锁不覆盖不同目录的任务。首次服务器验收后，应保存实际依赖清单、日志、资源峰值和样片，再决定是否发布 Docker 或扩展到小显存、多卡、API。
 
